@@ -1,0 +1,10 @@
+# cargo-mutants configuration.
+
+# The scalar permutation's per-round arithmetic is checked exhaustively by the
+# CAVP known-answer vectors and the libcrux differential tests; those catch any
+# arithmetic mutation. No functions are excluded — a surviving mutant here is a
+# genuine test gap.
+exclude_re = [
+    # build.rs only emits cfg flags; mutating it changes nothing testable.
+    "build\\.rs",
+]

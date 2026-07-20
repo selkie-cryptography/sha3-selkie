@@ -1,0 +1,19 @@
+version: 2
+updates:
+  # Bumps the SHA-pinned action refs, keeping the `# vN` comments legible so a
+  # bump reviews as a SHA change next to a version change.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      cargo:
+        patterns: ["*"]

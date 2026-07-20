@@ -1,0 +1,53 @@
+name: Benchmarks
+
+# Runs the divan benchmarks on a fixed runner and publishes the results as a
+# build artifact plus a job-summary table. This is the data source a
+# perf-trend dashboard consumes; standing up that dashboard (a fly.io site +
+# an upload token) is a separate follow-up — nothing here needs new infra.
+#
+# Hosted-runner CPUs are shared, so absolute numbers are noisy; the artifact
+# is for relative trends across commits on the same runner class, not
+# publishable cycle counts.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: never
+
+jobs:
+  bench:
+    name: divan (neon)
+    # aarch64: the arch the single-stream NEON permutation targets, so the
+    # trend tracks where acceleration will land. Scalar today.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Run benchmarks
+        run: cargo bench --bench hashes | tee bench-results.txt
+      - name: Publish to job summary
+        run: |
+          {
+            echo '## divan benchmarks (`${{ runner.arch }}`, commit `${{ github.sha }}`)'
+            echo '```'
+            cat bench-results.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: bench-results
+          path: bench-results.txt
+          retention-days: 90

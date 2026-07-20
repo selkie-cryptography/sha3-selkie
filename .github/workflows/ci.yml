@@ -1,0 +1,136 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4fd1da8b0805d2d2e936788875a7d65dbd677dc2 # nightly
+        with:
+          components: rustfmt
+      - run: cargo +nightly fmt --all --check
+
+  clippy:
+    name: clippy (${{ matrix.backend }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      # One leg per Keccak backend build.rs can select: portable on the x86
+      # runner, the single-stream NEON path on the aarch64 macOS runner (where
+      # NEON and the `sha3` feature are baseline). The backend is a cfg, not a
+      # cargo feature, so the runner architecture is what switches it.
+      matrix:
+        include:
+          - { backend: portable, os: ubuntu-latest }
+          - { backend: neon, os: macos-latest }
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - run: cargo clippy --all-targets -- -D warnings
+
+  doc:
+    name: doc (${{ matrix.backend }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { backend: portable, os: ubuntu-latest }
+          - { backend: neon, os: macos-latest }
+    env:
+      RUSTDOCFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - run: cargo doc --no-deps --document-private-items
+
+  test:
+    name: test (${{ matrix.backend }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      # The NEON leg builds and runs the single-stream backend against the same
+      # known-answer vectors, so its permutation is checked on the aarch64
+      # runner where it is actually selected.
+      matrix:
+        include:
+          - { backend: portable, os: ubuntu-latest }
+          - { backend: neon, os: macos-latest }
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9 # v2
+        with:
+          tool: nextest
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Unit tests
+        run: cargo nextest run
+      # nextest does not run doctests; the README example is one, so run it.
+      - name: Doctests
+        run: cargo test --doc
+
+  benches-compile:
+    name: Benchmarks compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - run: cargo bench --no-run
+
+  msrv:
+    name: MSRV (1.85)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: "1.85"
+      - run: cargo build
+
+  no-std:
+    name: no_std build
+    # Builds the library for a bare-metal target with no `std`, proving the
+    # `#![no_std]` claim (dev-dependencies are std but are not compiled here).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          targets: thumbv7em-none-eabi
+      - run: cargo build --target thumbv7em-none-eabi

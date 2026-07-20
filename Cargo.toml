@@ -1,0 +1,31 @@
+[package]
+name = "sha3-selkie"
+version = "0.1.0"
+edition = "2021"
+authors = ["Deirdre Connolly <durumcrustulum@gmail.com>"]
+description = "FIPS 202 (SHA-3 and SHAKE) for beautiful, secure code."
+license = "Apache-2.0 OR MIT"
+rust-version = "1.85"
+keywords = ["cryptography", "sha3", "shake", "keccak", "fips202"]
+categories = ["cryptography", "no-std"]
+repository = "https://github.com/selkie-cryptography/sha3-selkie"
+
+[dependencies]
+
+[dev-dependencies]
+hex = "0.4"
+proptest = "1"
+# The independent SHA-3 implementation this crate cross-checks against.
+libcrux-sha3 = { version = "=0.0.10", default-features = false }
+divan = "0.1"
+
+[[bench]]
+name = "hashes"
+harness = false
+
+[lints.rust]
+unsafe_code = "deny"
+
+[profile.profiling]
+inherits = "release"
+debug = true

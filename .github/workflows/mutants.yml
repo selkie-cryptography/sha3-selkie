@@ -1,0 +1,63 @@
+name: Mutants
+
+on:
+  pull_request:
+  schedule:
+    - cron: "0 5 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # PR diffs run per-arch: the single-stream NEON backend is cfg'd out of the
+  # compile graph on x86, so a mutation to it would trivially survive there.
+  # The aarch64 leg exercises it. cargo-mutants walks source with syn (cfg-
+  # blind), so it emits mutations for the gated file regardless of runner.
+  incremental:
+    name: cargo-mutants (changed code, ${{ matrix.arch }})
+    if: github.event_name == 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
+    runs-on: ${{ matrix.arch == 'x86_64' && 'ubuntu-latest' || 'macos-latest' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@4fd1da8b0805d2d2e936788875a7d65dbd677dc2 # nightly
+      - uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9 # v2
+        with:
+          tool: cargo-mutants,cargo-nextest
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Mutate the PR diff
+        run: |
+          git diff "origin/${{ github.base_ref }}" -- . > pr.diff
+          cargo mutants --in-diff pr.diff --test-tool nextest
+
+  # Weekly full-tree run on both arches, so backend-specific mutations are
+  # exercised where their code actually compiles.
+  full:
+    name: cargo-mutants (full, ${{ matrix.arch }})
+    if: github.event_name != 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
+    runs-on: ${{ matrix.arch == 'x86_64' && 'ubuntu-latest' || 'macos-latest' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4fd1da8b0805d2d2e936788875a7d65dbd677dc2 # nightly
+      - uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9 # v2
+        with:
+          tool: cargo-mutants,cargo-nextest
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - run: cargo mutants --test-tool nextest
