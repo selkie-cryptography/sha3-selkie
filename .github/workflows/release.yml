@@ -79,7 +79,8 @@ jobs:
           toolchain: ${{ env.RELEASE_TOOLCHAIN }}
       - uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9 # v2
         with:
-          tool: nextest,cargo-deny
+          # cargo-deny pinned in lockstep with Audit.
+          tool: nextest,cargo-deny@0.20.2
       - name: Test (locked)
         run: |
           cargo nextest run --locked

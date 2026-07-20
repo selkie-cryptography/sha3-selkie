@@ -1,7 +1,10 @@
 # cargo-deny configuration. https://embarkstudios.github.io/cargo-deny/
 
+[graph]
+# Zero runtime deps: gate only this crate, not dev-only trees.
+exclude-dev = true
+
 [advisories]
-unmaintained = "warn"
 yanked = "deny"
 
 [bans]
@@ -9,7 +12,7 @@ multiple-versions = "warn"
 wildcards = "deny"
 
 [licenses]
-# Permissive licenses acceptable for an Apache-2.0 OR MIT crate.
+# The crate's own dual license; the only ones in the graph.
 allow = [
     "MIT",
     "Apache-2.0",

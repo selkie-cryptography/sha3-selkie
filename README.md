@@ -2,7 +2,7 @@
 
 FIPS 202 (SHA-3 and SHAKE) for beautiful, secure code.
 
-The SHA-3 family over Keccak-*f*[1600]: the fixed-output hashes `Sha3_256`
+The SHA-3 family over `Keccak-f[1600]`: the fixed-output hashes `Sha3_256`
 and `Sha3_512`, and the extendable-output functions `Shake128` and
 `Shake256`. Each is an incremental hasher (`new` / `update` / `finalize`)
 with a one-shot associated constructor (`digest`). The batched `Shake128X4`
