@@ -32,8 +32,8 @@ The Keccak permutation impl is dispatched at compile time (the
 ## Constant-time
 
 Keccak has no data-dependent branches, memory indexing, or rotation amounts,
-so every hasher here is constant-time in its input, suitable for the
-secret-derived preimages of a KEM's `H`/`G`/`J`/`PRF`.
+so every hasher here is constant-time in its input, suitable for computing
+over secret values.
 
 ## Testing
 
@@ -47,10 +47,6 @@ secret-derived preimages of a KEM's `H`/`G`/`J`/`PRF`.
   alongside the sponge invariants (chunked absorb equals one-shot, chunked
   squeeze equals bulk, each batched lane equals the scalar hasher).
 - **Mutation tested** with `cargo-mutants`.
-
-Project Wycheproof has no raw SHA-3 or SHAKE test vectors (it targets
-constructions that *use* hashes, such as HMAC and signatures), so there is
-nothing there to pull for a bare hash.
 
 ## Status
 
