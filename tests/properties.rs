@@ -99,3 +99,58 @@ proptest! {
         }
     }
 }
+
+/// A deterministic pseudo-random buffer of `len` bytes, so the large-input
+/// tests are reproducible and need no external data.
+fn pattern(len: usize) -> Vec<u8> {
+    let mut out = Vec::with_capacity(len);
+    let mut x: u32 = 0x9E37_79B9;
+    for _ in 0..len {
+        x = x.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        out.push((x >> 24) as u8);
+    }
+
+    out
+}
+
+/// Hashing a multi-megabyte input — thousands of rate blocks, far past what the
+/// CAVP short-message vectors and the proptest inputs reach — matches the
+/// reference on both the absorb (fixed-output) and squeeze (XOF) paths.
+#[test]
+fn large_input_matches_reference() {
+    let data = pattern(1 << 20);
+
+    assert_eq!(
+        sha3_selkie::Sha3_256::digest(&data),
+        libcrux_sha3::sha256(&data)
+    );
+    assert_eq!(
+        sha3_selkie::Sha3_512::digest(&data),
+        libcrux_sha3::sha512(&data)
+    );
+
+    let squeeze_len = 1 << 18;
+    assert_eq!(
+        selkie_shake128(&data, squeeze_len),
+        libcrux_shake128(&data, squeeze_len),
+    );
+}
+
+/// Absorbing a large input in irregular chunks whose sizes straddle the rate
+/// equals a one-shot over the whole, exercising cross-block buffering at scale.
+#[test]
+fn large_incremental_matches_one_shot() {
+    let data = pattern(1 << 20);
+
+    let mut hasher = sha3_selkie::Sha3_256::new();
+    let mut offset = 0;
+    let mut step = 1;
+    while offset < data.len() {
+        let end = (offset + step).min(data.len());
+        hasher.update(&data[offset..end]);
+        offset = end;
+        step = step % 137 + 1;
+    }
+
+    assert_eq!(hasher.finalize(), sha3_selkie::Sha3_256::digest(&data));
+}

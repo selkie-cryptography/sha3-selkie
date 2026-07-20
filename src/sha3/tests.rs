@@ -46,3 +46,10 @@ fn incremental_matches_one_shot() {
 
     assert_eq!(hasher.finalize(), Sha3_256::digest(b"hello world"));
 }
+
+/// The `Default` constructor yields a fresh hasher equivalent to `new`.
+#[test]
+fn default_matches_new() {
+    assert_eq!(Sha3_256::default().finalize(), Sha3_256::digest(b""));
+    assert_eq!(Sha3_512::default().finalize(), Sha3_512::digest(b""));
+}

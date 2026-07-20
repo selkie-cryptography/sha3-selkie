@@ -1,0 +1,6 @@
+# corpus/ is intentionally tracked: the committed CAVP-derived seeds are the
+# baseline coverage, and CI caches discoveries on top.
+target
+artifacts
+coverage
+Cargo.lock

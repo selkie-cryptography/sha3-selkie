@@ -9,6 +9,9 @@ rust-version = "1.85"
 keywords = ["cryptography", "sha3", "shake", "keccak", "fips202"]
 categories = ["cryptography", "no-std"]
 repository = "https://github.com/selkie-cryptography/sha3-selkie"
+# The fuzz crate is a separate nightly/libfuzzer workspace, not part of the
+# published package.
+exclude = ["fuzz"]
 
 [dependencies]
 

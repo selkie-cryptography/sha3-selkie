@@ -46,3 +46,15 @@ fn streaming_matches_bulk() {
 
     assert_eq!(bulk, piecemeal);
 }
+
+/// The `Default` constructor yields a fresh XOF equivalent to `new`.
+#[test]
+fn default_matches_new() {
+    let mut from_default = [0u8; 32];
+    Shake128::default().finalize_xof().read(&mut from_default);
+    assert_eq!(from_default, Shake128::digest::<32>(b""));
+
+    let mut from_default = [0u8; 32];
+    Shake256::default().finalize_xof().read(&mut from_default);
+    assert_eq!(from_default, Shake256::digest::<32>(b""));
+}

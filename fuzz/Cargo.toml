@@ -1,0 +1,35 @@
+[package]
+name = "sha3-selkie-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+# The independent oracle: every target asserts we agree with it byte for byte.
+libcrux-sha3 = { version = "=0.0.10", default-features = false }
+
+[dependencies.sha3-selkie]
+path = ".."
+
+[[bin]]
+name = "differential"
+path = "fuzz_targets/differential.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "batched"
+path = "fuzz_targets/batched.rs"
+test = false
+doc = false
+bench = false
+
+# Own workspace root: keeps the fuzz crate and its libfuzzer/nightly deps out of
+# the parent crate's build and lockfile.
+[workspace]
