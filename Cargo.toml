@@ -20,7 +20,7 @@ libcrux-sha3 = { version = "=0.0.10", default-features = false }
 divan = "0.1"
 
 [[bench]]
-name = "hashes"
+name = "hash_functions"
 harness = false
 
 [lints.rust]

@@ -1,6 +1,6 @@
 //! Extendable-output functions ([FIPS 202 Section 6.2]): SHAKE128 and SHAKE256.
 //!
-//! Each is an absorbing hasher whose [`finalize_xof`][Shake128::finalize_xof]
+//! Each is an absorbing sponge whose [`finalize_xof`][Shake128::finalize_xof]
 //! yields a reader that streams output on demand, for callers like ML-KEM's
 //! `SampleNTT` rejection sampler that cannot know their output length in
 //! advance.

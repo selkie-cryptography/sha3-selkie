@@ -51,7 +51,7 @@ over secret values.
 ## Status
 
 Working scalar core with the full public API, NIST CAVP conformance, and
-`hashes` benchmarks.
+hash-function benchmarks.
 
 ## License
 
