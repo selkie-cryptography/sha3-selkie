@@ -29,21 +29,15 @@ fn keccak_f1600_zero_state_kat() {
     assert_eq!(state, KECCAK_F1600_ZERO_STATE);
 }
 
-/// The accelerated backend must produce bit-identical output to the scalar
-/// reference on every state.
+/// The single-stream backend matches the scalar reference on every state.
 ///
-/// This is the harness that makes vector bring-up tractable: a mis-shuffled
-/// SIMD lane fails here, on a raw state, rather than as an opaque wrong digest
-/// three layers up in a sponge-level test. It runs wherever `sha3_selkie_ext`
-/// is set (the Arm SHA-3 extension, baseline on Apple silicon and on the macOS
-/// CI leg). Today the backend delegates to scalar, so it passes trivially and
-/// stands ready for the real permutation.
+/// It delegates to scalar today, so this passes trivially; it stays as a guard
+/// against a future single-stream backend diverging.
 #[cfg(sha3_selkie_ext)]
 #[test]
 fn ext_backend_matches_scalar() {
     use super::neon;
 
-    // A deterministic xorshift64 so the states are reproducible without a dep.
     let mut seed: u64 = 0x2545_F491_4F6C_DD1D;
     let mut next = || {
         seed ^= seed << 13;
@@ -63,5 +57,43 @@ fn ext_backend_matches_scalar() {
         neon::permute(&mut accelerated);
 
         assert_eq!(state, accelerated);
+    }
+}
+
+/// Both states of the two-way batched permutation reproduce the scalar
+/// reference on their own lane.
+///
+/// This is the harness for the batched vector code: a mis-packed or
+/// wrong-rotation lane fails here on a raw state pair, rather than as an opaque
+/// wrong digest in a `Shake128X4` output.
+#[cfg(sha3_selkie_ext)]
+#[test]
+fn batched_pair_matches_scalar() {
+    use super::neon;
+
+    let mut seed: u64 = 0x9E37_79B9_7F4A_7C15;
+    let mut next = || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        seed
+    };
+
+    for _ in 0..256 {
+        let mut a = [0u64; 25];
+        let mut b = [0u64; 25];
+        for (lane_a, lane_b) in a.iter_mut().zip(b.iter_mut()) {
+            *lane_a = next();
+            *lane_b = next();
+        }
+
+        let mut expected_a = a;
+        let mut expected_b = b;
+        neon::permute_pair(&mut a, &mut b);
+        scalar::permute(&mut expected_a);
+        scalar::permute(&mut expected_b);
+
+        assert_eq!(a, expected_a);
+        assert_eq!(b, expected_b);
     }
 }

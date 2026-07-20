@@ -14,7 +14,7 @@ mod tests;
 
 /// The SHAKE domain-separation byte (`1111` then pad10*1, packed
 /// little-endian).
-const SHAKE_DOMAIN: u8 = 0x1F;
+pub(crate) const SHAKE_DOMAIN: u8 = 0x1F;
 
 /// SHAKE128: an extendable-output function with a 168-byte rate.
 #[derive(Clone)]

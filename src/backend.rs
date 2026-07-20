@@ -11,6 +11,10 @@ mod tests;
 mod scalar;
 
 #[cfg(sha3_selkie_ext)]
+#[allow(
+    unsafe_code,
+    reason = "the accelerated backend needs FEAT_SHA3 intrinsics"
+)]
 mod neon;
 
 /// The `Keccak-f[1600]` permutation state: 25 lanes of 64 bits, lane `(x, y)`
@@ -60,5 +64,28 @@ impl State {
 
         #[cfg(not(sha3_selkie_ext))]
         scalar::permute(&mut self.lanes);
+    }
+}
+
+/// Permutes four independent states at once, for the batched sponge.
+///
+/// On `sha3_selkie_ext` this runs two two-way NEON permutations; otherwise it
+/// falls back to four scalar permutations, so the batched sponge is correct on
+/// every target and accelerated where the SHA-3 extension is present.
+pub(crate) fn permute_x4(states: &mut [[u64; 25]; 4]) {
+    let [a, b, c, d] = states;
+
+    #[cfg(sha3_selkie_ext)]
+    {
+        neon::permute_pair(a, b);
+        neon::permute_pair(c, d);
+    }
+
+    #[cfg(not(sha3_selkie_ext))]
+    {
+        scalar::permute(a);
+        scalar::permute(b);
+        scalar::permute(c);
+        scalar::permute(d);
     }
 }

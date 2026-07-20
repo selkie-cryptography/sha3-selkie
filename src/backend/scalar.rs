@@ -3,7 +3,7 @@
 /// The 24 `Keccak-f[1600]` round constants ([FIPS 202 Section 3.2.5]).
 ///
 /// [FIPS 202 Section 3.2.5]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.202.pdf#subsubsection.3.2.5
-const ROUND_CONSTANTS: [u64; 24] = [
+pub(super) const ROUND_CONSTANTS: [u64; 24] = [
     0x0000_0000_0000_0001,
     0x0000_0000_0000_8082,
     0x8000_0000_0000_808A,
@@ -33,7 +33,7 @@ const ROUND_CONSTANTS: [u64; 24] = [
 /// The rho rotation offset per lane `x + 5*y` ([FIPS 202 Section 3.2.2]).
 ///
 /// [FIPS 202 Section 3.2.2]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.202.pdf#subsubsection.3.2.2
-const RHO: [u32; 25] = [
+pub(super) const RHO: [u32; 25] = [
     0, 1, 62, 28, 27, //
     36, 44, 6, 55, 20, //
     3, 10, 43, 25, 39, //
@@ -46,6 +46,9 @@ const RHO: [u32; 25] = [
 /// Every index below is a compile-time-bounded lane coordinate (`x, y < 5`), so
 /// the accesses are provably in bounds; the fully-unrolled fixed-index form is
 /// ~5x longer and hides the theta/rho/pi/chi/iota structure.
+// On `sha3_selkie_ext` builds production dispatches to `neon::permute`; this
+// stays as the cross-check reference the backend tests compare against.
+#[cfg_attr(sha3_selkie_ext, allow(dead_code))]
 #[allow(
     clippy::indexing_slicing,
     reason = "the loop indices are `x + 5*y` with `x, y < 5`"
