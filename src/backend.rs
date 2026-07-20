@@ -5,6 +5,9 @@
 //! byte-to-lane packing of the sponge lives in [`crate::sponge`], so a backend
 //! only implements the 24-round permutation over `[u64; 25]`.
 
+#[cfg(test)]
+mod tests;
+
 mod scalar;
 
 #[cfg(sha3_selkie_ext)]
