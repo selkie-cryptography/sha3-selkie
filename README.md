@@ -59,4 +59,5 @@ Working scalar core with the full public API, NIST CAVP conformance, and
 
 ## License
 
-Apache-2.0 OR MIT.
+Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or
+[MIT license](LICENSE-MIT) at your option.
