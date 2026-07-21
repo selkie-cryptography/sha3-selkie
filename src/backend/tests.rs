@@ -29,6 +29,37 @@ fn keccak_f1600_zero_state_kat() {
     assert_eq!(state, KECCAK_F1600_ZERO_STATE);
 }
 
+/// The four-way batched `permute_x4` reproduces the scalar reference on each of
+/// its four states, whichever backend it dispatches to (AVX2, two NEON pairs,
+/// or four scalar permutes).
+#[test]
+fn permute_x4_matches_scalar() {
+    let mut seed: u64 = 0x243F_6A88_85A3_08D3;
+    let mut next = || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        seed
+    };
+
+    for _ in 0..64 {
+        let mut states = [[0u64; 25]; 4];
+        for state in &mut states {
+            for lane in state.iter_mut() {
+                *lane = next();
+            }
+        }
+
+        let mut expected = states;
+        super::permute_x4(&mut states);
+        for state in &mut expected {
+            scalar::permute(state);
+        }
+
+        assert_eq!(states, expected);
+    }
+}
+
 /// The single-stream backend matches the scalar reference on every state.
 ///
 /// It delegates to scalar today, so this passes trivially; it stays as a guard

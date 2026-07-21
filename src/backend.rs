@@ -17,6 +17,10 @@ mod scalar;
 )]
 mod neon;
 
+#[cfg(sha3_selkie_avx2)]
+#[allow(unsafe_code, reason = "the batched backend needs AVX2 intrinsics")]
+mod avx2;
+
 /// The `Keccak-f[1600]` permutation state: 25 lanes of 64 bits, lane `(x, y)`
 /// at index `x + 5*y`, each stored little-endian.
 #[derive(Clone)]
@@ -69,9 +73,20 @@ impl State {
 
 /// Permutes four independent states at once, for the batched sponge.
 ///
-/// On `sha3_selkie_ext` this runs two two-way NEON permutations; otherwise it
-/// falls back to four scalar permutations, so the batched sponge is correct on
-/// every target and accelerated where the SHA-3 extension is present.
+/// Uses the four-way AVX2 permutation on x86-64, two two-way NEON permutations
+/// on aarch64 with the SHA-3 extension, and four scalar permutations otherwise,
+/// so the batched sponge is correct on every target and accelerated where a
+/// vector backend is present.
+#[cfg(sha3_selkie_avx2)]
+pub(crate) fn permute_x4(states: &mut [[u64; 25]; 4]) {
+    avx2::permute_x4(states);
+}
+
+/// Permutes four independent states at once, for the batched sponge.
+///
+/// See the AVX2 variant; this runs two two-way NEON permutations, or four
+/// scalar permutations off the SHA-3 extension.
+#[cfg(not(sha3_selkie_avx2))]
 pub(crate) fn permute_x4(states: &mut [[u64; 25]; 4]) {
     let [a, b, c, d] = states;
 

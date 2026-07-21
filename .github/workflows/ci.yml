@@ -32,16 +32,19 @@ jobs:
   clippy:
     name: clippy (${{ matrix.backend }})
     runs-on: ${{ matrix.os }}
+    env:
+      RUSTFLAGS: ${{ matrix.flags }}
     strategy:
       fail-fast: false
-      # One leg per Keccak backend build.rs can select: portable on the x86
-      # runner, the single-stream NEON path on the aarch64 macOS runner (where
-      # NEON and the `sha3` feature are baseline). The backend is a cfg, not a
-      # cargo feature, so the runner architecture is what switches it.
+      # One leg per Keccak backend build.rs can select: portable (scalar) on
+      # x86, the four-way AVX2 batched path on x86 with the feature forced on,
+      # and NEON on the aarch64 macOS runner (`sha3` baseline there). The backend
+      # is a cfg keyed off target features, so `flags` is what switches it.
       matrix:
         include:
-          - { backend: portable, os: ubuntu-latest }
-          - { backend: neon, os: macos-latest }
+          - { backend: portable, os: ubuntu-latest, flags: "" }
+          - { backend: avx2, os: ubuntu-latest, flags: "-C target-feature=+avx2" }
+          - { backend: neon, os: macos-latest, flags: "" }
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -59,10 +62,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { backend: portable, os: ubuntu-latest }
-          - { backend: neon, os: macos-latest }
+          - { backend: portable, os: ubuntu-latest, flags: "" }
+          - { backend: avx2, os: ubuntu-latest, flags: "-C target-feature=+avx2" }
+          - { backend: neon, os: macos-latest, flags: "" }
     env:
       RUSTDOCFLAGS: -D warnings
+      RUSTFLAGS: ${{ matrix.flags }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -74,15 +79,18 @@ jobs:
   test:
     name: test (${{ matrix.backend }})
     runs-on: ${{ matrix.os }}
+    env:
+      RUSTFLAGS: ${{ matrix.flags }}
     strategy:
       fail-fast: false
-      # The NEON leg builds and runs the single-stream backend against the same
-      # known-answer vectors, so its permutation is checked on the aarch64
-      # runner where it is actually selected.
+      # The AVX2 and NEON legs run the batched permutation against the same
+      # known-answer and differential vectors on the arch where it is selected,
+      # so `permute_x4` is validated on real x86 and aarch64 hardware.
       matrix:
         include:
-          - { backend: portable, os: ubuntu-latest }
-          - { backend: neon, os: macos-latest }
+          - { backend: portable, os: ubuntu-latest, flags: "" }
+          - { backend: avx2, os: ubuntu-latest, flags: "-C target-feature=+avx2" }
+          - { backend: neon, os: macos-latest, flags: "" }
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
