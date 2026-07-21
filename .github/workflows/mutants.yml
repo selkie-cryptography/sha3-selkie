@@ -13,19 +13,31 @@ concurrency:
 permissions:
   contents: read
 
+# Per-arch legs run with that arch's backend feature forced on (sha3 is an
+# Apple default, avx2 is not — forcing keeps the active backend visible), so
+# backend mutants are exercised where their code compiles. Each leg excludes
+# the other arch's backend file: cargo-mutants walks source with syn
+# (cfg-blind), so it would emit mutants for the cfg'd-out file, and those
+# survive trivially.
 jobs:
-  # PR diffs run per-arch: the single-stream NEON backend is cfg'd out of the
-  # compile graph on x86, so a mutation to it would trivially survive there.
-  # The aarch64 leg exercises it. cargo-mutants walks source with syn (cfg-
-  # blind), so it emits mutations for the gated file regardless of runner.
   incremental:
     name: cargo-mutants (changed code, ${{ matrix.arch }})
     if: github.event_name == 'pull_request'
     strategy:
       fail-fast: false
       matrix:
-        arch: [x86_64, aarch64]
-    runs-on: ${{ matrix.arch == 'x86_64' && 'ubuntu-latest' || 'macos-latest' }}
+        include:
+          - arch: x86_64
+            os: ubuntu-latest
+            flags: "-C target-feature=+avx2"
+            exclude: src/backend/neon.rs
+          - arch: aarch64
+            os: macos-latest
+            flags: "-C target-feature=+sha3"
+            exclude: src/backend/avx2.rs
+    runs-on: ${{ matrix.os }}
+    env:
+      RUSTFLAGS: ${{ matrix.flags }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -41,18 +53,28 @@ jobs:
       - name: Mutate the PR diff
         run: |
           git diff "origin/${{ github.base_ref }}" -- . > pr.diff
-          cargo mutants --in-diff pr.diff --test-tool nextest
+          cargo mutants --in-diff pr.diff --test-tool nextest --exclude "${{ matrix.exclude }}"
 
-  # Weekly full-tree run on both arches, so backend-specific mutations are
-  # exercised where their code actually compiles.
+  # Weekly full-tree run on both arches, so every backend's mutations are
+  # exercised on the arch where its code actually compiles.
   full:
     name: cargo-mutants (full, ${{ matrix.arch }})
     if: github.event_name != 'pull_request'
     strategy:
       fail-fast: false
       matrix:
-        arch: [x86_64, aarch64]
-    runs-on: ${{ matrix.arch == 'x86_64' && 'ubuntu-latest' || 'macos-latest' }}
+        include:
+          - arch: x86_64
+            os: ubuntu-latest
+            flags: "-C target-feature=+avx2"
+            exclude: src/backend/neon.rs
+          - arch: aarch64
+            os: macos-latest
+            flags: "-C target-feature=+sha3"
+            exclude: src/backend/avx2.rs
+    runs-on: ${{ matrix.os }}
+    env:
+      RUSTFLAGS: ${{ matrix.flags }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -64,4 +86,4 @@ jobs:
         with:
           tool: cargo-mutants,cargo-nextest
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-      - run: cargo mutants --test-tool nextest
+      - run: cargo mutants --test-tool nextest --exclude "${{ matrix.exclude }}"

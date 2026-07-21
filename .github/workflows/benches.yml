@@ -12,6 +12,12 @@ name: Benchmarks
 on:
   push:
     branches: [main]
+  pull_request:
+    paths:
+      - "src/**"
+      - "benches/**"
+      - "Cargo.toml"
+      - ".github/workflows/benches.yml"
   workflow_dispatch:
 
 concurrency:
