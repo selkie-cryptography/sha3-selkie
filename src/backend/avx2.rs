@@ -24,8 +24,7 @@ use super::scalar::ROUND_CONSTANTS;
 ///
 /// # Safety
 ///
-/// The caller must run on a CPU with AVX2 (guaranteed by the `sha3_selkie_avx2`
-/// cfg gating this module).
+/// AVX2 only.
 #[inline]
 unsafe fn rol<const SHL: i32, const SHR: i32>(v: __m256i) -> __m256i {
     _mm256_or_si256(_mm256_slli_epi64::<SHL>(v), _mm256_srli_epi64::<SHR>(v))
@@ -37,7 +36,7 @@ unsafe fn rol<const SHL: i32, const SHR: i32>(v: __m256i) -> __m256i {
 ///
 /// # Safety
 ///
-/// The caller must run on a CPU with AVX2.
+/// AVX2 only.
 #[inline]
 unsafe fn rol8(v: __m256i) -> __m256i {
     #[rustfmt::skip]
@@ -53,7 +52,7 @@ unsafe fn rol8(v: __m256i) -> __m256i {
 ///
 /// # Safety
 ///
-/// The caller must run on a CPU with AVX2.
+/// AVX2 only.
 #[inline]
 unsafe fn rol56(v: __m256i) -> __m256i {
     #[rustfmt::skip]
@@ -159,7 +158,7 @@ pub(crate) fn permute_x4(states: &mut [[u64; 25]; 4]) {
 ///
 /// # Safety
 ///
-/// The caller must run on a CPU with AVX2.
+/// AVX2 only.
 #[inline]
 unsafe fn xor5(a: __m256i, b: __m256i, c: __m256i, d: __m256i, e: __m256i) -> __m256i {
     _mm256_xor_si256(
