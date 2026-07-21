@@ -30,12 +30,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
-      # One leg per vector backend on the arch that selects it: the two-way NEON
-      # batched path on the aarch64 macOS runner, and the four-way AVX2 path on
-      # x86 with the feature forced on. `flags` switches the backend cfg.
+      # One leg per vector backend: two-way NEON on aarch64 macOS, four-way AVX2
+      # on x86. `flags` forces each backend's feature explicitly — sha3 is an
+      # Apple default, avx2 is not — so the active backend is visible here.
       matrix:
         include:
-          - { backend: neon, os: macos-latest, flags: "" }
+          - { backend: neon, os: macos-latest, flags: "-C target-feature=+sha3" }
           - { backend: avx2, os: ubuntu-latest, flags: "-C target-feature=+avx2" }
     env:
       RUSTFLAGS: ${{ matrix.flags }}

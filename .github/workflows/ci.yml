@@ -36,15 +36,15 @@ jobs:
       RUSTFLAGS: ${{ matrix.flags }}
     strategy:
       fail-fast: false
-      # One leg per Keccak backend build.rs can select: portable (scalar) on
-      # x86, the four-way AVX2 batched path on x86 with the feature forced on,
-      # and NEON on the aarch64 macOS runner (`sha3` baseline there). The backend
-      # is a cfg keyed off target features, so `flags` is what switches it.
+      # One leg per Keccak backend: portable (scalar) on x86, four-way AVX2 on
+      # x86, two-way NEON on aarch64 macOS. `flags` forces each backend's feature
+      # explicitly — sha3 is an Apple default, avx2 is not — so the active
+      # backend is visible rather than relying on a target default.
       matrix:
         include:
           - { backend: portable, os: ubuntu-latest, flags: "" }
           - { backend: avx2, os: ubuntu-latest, flags: "-C target-feature=+avx2" }
-          - { backend: neon, os: macos-latest, flags: "" }
+          - { backend: neon, os: macos-latest, flags: "-C target-feature=+sha3" }
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -64,7 +64,7 @@ jobs:
         include:
           - { backend: portable, os: ubuntu-latest, flags: "" }
           - { backend: avx2, os: ubuntu-latest, flags: "-C target-feature=+avx2" }
-          - { backend: neon, os: macos-latest, flags: "" }
+          - { backend: neon, os: macos-latest, flags: "-C target-feature=+sha3" }
     env:
       RUSTDOCFLAGS: -D warnings
       RUSTFLAGS: ${{ matrix.flags }}
@@ -90,7 +90,7 @@ jobs:
         include:
           - { backend: portable, os: ubuntu-latest, flags: "" }
           - { backend: avx2, os: ubuntu-latest, flags: "-C target-feature=+avx2" }
-          - { backend: neon, os: macos-latest, flags: "" }
+          - { backend: neon, os: macos-latest, flags: "-C target-feature=+sha3" }
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
