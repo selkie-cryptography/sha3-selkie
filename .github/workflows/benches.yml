@@ -26,10 +26,19 @@ env:
 
 jobs:
   bench:
-    name: divan (neon)
-    # aarch64: the arch the single-stream NEON permutation targets, so the
-    # trend tracks where acceleration will land. Scalar today.
-    runs-on: macos-latest
+    name: divan (${{ matrix.backend }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      # One leg per vector backend on the arch that selects it: the two-way NEON
+      # batched path on the aarch64 macOS runner, and the four-way AVX2 path on
+      # x86 with the feature forced on. `flags` switches the backend cfg.
+      matrix:
+        include:
+          - { backend: neon, os: macos-latest, flags: "" }
+          - { backend: avx2, os: ubuntu-latest, flags: "-C target-feature=+avx2" }
+    env:
+      RUSTFLAGS: ${{ matrix.flags }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -41,13 +50,13 @@ jobs:
       - name: Publish to job summary
         run: |
           {
-            echo '## divan benchmarks (`${{ runner.arch }}`, commit `${{ github.sha }}`)'
+            echo '## divan benchmarks (`${{ matrix.backend }}`, `${{ runner.arch }}`, commit `${{ github.sha }}`)'
             echo '```'
             cat bench-results.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: bench-results
+          name: bench-results-${{ matrix.backend }}
           path: bench-results.txt
           retention-days: 90
