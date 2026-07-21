@@ -3,14 +3,17 @@
 //! Four independent states occupy the four 64-bit lanes of every `__m256i`, so
 //! one permutation advances all four lanes of `Shake128X4` / `Shake256X4` at
 //! once. AVX2 has no three-way XOR, no bit-clear-XOR, and no 64-bit vector
-//! rotate, so theta is plain XORs, chi is `andnot` + `xor`, and each rotate is
-//! a shift-left / shift-right / or. The structure mirrors the two-way NEON
-//! permutation, cross-checked lane for lane against the scalar reference.
+//! rotate, so theta is plain XORs, chi is `andnot` + `xor`, and a general
+//! rotate is a shift-left / shift-right / or — except where rho lands on a
+//! multiple of 8 (lanes 19 and 23), where one `vpshufb` byte shuffle rotates
+//! in a single op, and lane 0's zero rotate, which drops out entirely. The
+//! structure mirrors the two-way NEON permutation, cross-checked lane for
+//! lane against the scalar reference.
 
 use core::arch::x86_64::{
-    __m256i, _mm256_andnot_si256, _mm256_extract_epi64, _mm256_or_si256, _mm256_set_epi64x,
-    _mm256_set1_epi64x, _mm256_setzero_si256, _mm256_slli_epi64, _mm256_srli_epi64,
-    _mm256_xor_si256,
+    __m256i, _mm256_andnot_si256, _mm256_extract_epi64, _mm256_or_si256, _mm256_set_epi8,
+    _mm256_set_epi64x, _mm256_set1_epi64x, _mm256_setzero_si256, _mm256_shuffle_epi8,
+    _mm256_slli_epi64, _mm256_srli_epi64, _mm256_xor_si256,
 };
 
 use super::scalar::ROUND_CONSTANTS;
@@ -26,6 +29,39 @@ use super::scalar::ROUND_CONSTANTS;
 #[inline]
 unsafe fn rol<const SHL: i32, const SHR: i32>(v: __m256i) -> __m256i {
     _mm256_or_si256(_mm256_slli_epi64::<SHL>(v), _mm256_srli_epi64::<SHR>(v))
+}
+
+/// Rotates each 64-bit lane left by 8: whole bytes move, so one `vpshufb`
+/// replaces the three-op shift pair. `vpshufb` indexes within each 128-bit
+/// half, and a qword's bytes stay in their half, so the shuffle never crosses.
+///
+/// # Safety
+///
+/// The caller must run on a CPU with AVX2.
+#[inline]
+unsafe fn rol8(v: __m256i) -> __m256i {
+    #[rustfmt::skip]
+    let idx = _mm256_set_epi8(
+        14, 13, 12, 11, 10, 9, 8, 15, 6, 5, 4, 3, 2, 1, 0, 7,
+        14, 13, 12, 11, 10, 9, 8, 15, 6, 5, 4, 3, 2, 1, 0, 7,
+    );
+    _mm256_shuffle_epi8(v, idx)
+}
+
+/// Rotates each 64-bit lane left by 56 (right by 8) via one `vpshufb`; see
+/// [`rol8`].
+///
+/// # Safety
+///
+/// The caller must run on a CPU with AVX2.
+#[inline]
+unsafe fn rol56(v: __m256i) -> __m256i {
+    #[rustfmt::skip]
+    let idx = _mm256_set_epi8(
+        8, 15, 14, 13, 12, 11, 10, 9, 0, 7, 6, 5, 4, 3, 2, 1,
+        8, 15, 14, 13, 12, 11, 10, 9, 0, 7, 6, 5, 4, 3, 2, 1,
+    );
+    _mm256_shuffle_epi8(v, idx)
 }
 
 /// Applies the 24-round permutation to four independent states at once, one per
@@ -63,9 +99,10 @@ pub(crate) fn permute_x4(states: &mut [[u64; 25]; 4]) {
             let d4 = _mm256_xor_si256(c3, rol::<1, 63>(c0));
 
             // theta fold + rho + pi: b[pi(x,y)] = rol(s[x,y] ^ d[x], rho); the
-            // second const is 64 - rho.
+            // second const is 64 - rho. Lane 0's rho is 0 (no rotate), and the
+            // byte-aligned rho at lanes 19 and 23 take the vpshufb helpers.
             let mut b = [_mm256_setzero_si256(); 25];
-            b[0] = rol::<0, 64>(_mm256_xor_si256(s[0], d0));
+            b[0] = _mm256_xor_si256(s[0], d0);
             b[10] = rol::<1, 63>(_mm256_xor_si256(s[1], d1));
             b[20] = rol::<62, 2>(_mm256_xor_si256(s[2], d2));
             b[5] = rol::<28, 36>(_mm256_xor_si256(s[3], d3));
@@ -84,11 +121,11 @@ pub(crate) fn permute_x4(states: &mut [[u64; 25]; 4]) {
             b[8] = rol::<45, 19>(_mm256_xor_si256(s[16], d1));
             b[18] = rol::<15, 49>(_mm256_xor_si256(s[17], d2));
             b[3] = rol::<21, 43>(_mm256_xor_si256(s[18], d3));
-            b[13] = rol::<8, 56>(_mm256_xor_si256(s[19], d4));
+            b[13] = rol8(_mm256_xor_si256(s[19], d4));
             b[14] = rol::<18, 46>(_mm256_xor_si256(s[20], d0));
             b[24] = rol::<2, 62>(_mm256_xor_si256(s[21], d1));
             b[9] = rol::<61, 3>(_mm256_xor_si256(s[22], d2));
-            b[19] = rol::<56, 8>(_mm256_xor_si256(s[23], d3));
+            b[19] = rol56(_mm256_xor_si256(s[23], d3));
             b[4] = rol::<14, 50>(_mm256_xor_si256(s[24], d4));
 
             // chi: A[x] = B[x] ^ (~B[x+1] & B[x+2]) = B[x] ^ andnot(B[x+1], B[x+2]).

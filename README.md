@@ -23,13 +23,18 @@ reader.read(&mut out);
 ## Backends
 
 The Keccak permutation is dispatched at compile time (the `sha3_selkie_ext`
-cfg from `build.rs`):
+and `sha3_selkie_avx2` cfgs from `build.rs`):
 
 - **scalar** — portable, the reference and fallback. Drives the single-stream
   `Sha3_256` / `Sha3_512` / `Shake128` / `Shake256` everywhere
 - **neon (two-way)** — on aarch64 with the Arm `sha3` extension, the batched
   `Shake128X4` / `Shake256X4` run two independent states per vector through
   `EOR3` / `RAX1` / `XAR` / `BCAX`. Unequal-length inputs fall back to scalar.
+- **avx2 (four-way)** — on x86-64 with AVX2, the batched `Shake128X4` /
+  `Shake256X4` run four independent states per vector: chi via `vpandn`,
+  general rotates as shift/shift/or, and the byte-aligned rho rotations
+  (lanes 19 and 23) as single `vpshufb` shuffles. Unequal-length inputs fall
+  back to scalar.
 
 ## Constant-time
 
@@ -52,9 +57,9 @@ over secret values.
 
 ## Status
 
-Working scalar core with the full public API and NIST CAVP conformance, a
-two-way NEON batched path for `Shake128X4` / `Shake256X4`, and hash-function
-benchmarks.
+Working scalar core with the full public API and NIST CAVP conformance,
+two-way NEON and four-way AVX2 batched paths for `Shake128X4` /
+`Shake256X4`, and hash-function benchmarks.
 
 ## License
 
