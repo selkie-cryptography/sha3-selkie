@@ -29,7 +29,7 @@ jobs:
           - { backend: portable, os: ubuntu-latest }
           - { backend: neon, os: macos-latest }
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
@@ -44,7 +44,7 @@ jobs:
         run: cargo llvm-cov --all-targets --lcov --output-path lcov.info
       - name: Coverage summary
         run: cargo llvm-cov report --summary-only
-      - uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac # v5
+      - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
           files: lcov.info
           flags: ${{ matrix.backend }}
