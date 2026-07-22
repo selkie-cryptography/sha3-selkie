@@ -10,6 +10,6 @@ mod sha3;
 mod shake;
 mod sponge;
 
-pub use batched::{Shake128X4, Shake256X4};
+pub use batched::{Shake128X4, Shake128X4Reader, Shake256X4, Shake256X4Reader};
 pub use sha3::{Sha3_256, Sha3_512};
 pub use shake::{Shake128, Shake128Reader, Shake256, Shake256Reader};

@@ -71,6 +71,12 @@ impl State {
     }
 }
 
+impl From<[u64; 25]> for State {
+    fn from(lanes: [u64; 25]) -> Self {
+        Self { lanes }
+    }
+}
+
 /// Permutes four independent states at once, for the batched sponge.
 ///
 /// Uses the four-way AVX2 permutation on x86-64, two two-way NEON permutations

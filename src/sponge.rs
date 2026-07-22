@@ -30,6 +30,12 @@ impl<const RATE: usize> Sponge<RATE> {
         }
     }
 
+    /// Rebuilds a sponge from a state and byte cursor (a batched lane leaving
+    /// lockstep).
+    pub(crate) const fn from_parts(state: State, offset: usize) -> Self {
+        Self { state, offset }
+    }
+
     /// Absorbs `data`, permuting after each full rate block.
     pub(crate) fn absorb(&mut self, data: &[u8]) {
         for &byte in data {
