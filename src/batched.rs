@@ -1,21 +1,30 @@
-//! Batched SHAKE: four independent streams squeezed in parallel.
+//! Batched SHAKE: four independent streams absorbed and squeezed in parallel.
 //!
-//! When the four inputs share a length the streams run in lockstep on the
-//! two-way batched permutation ([`permute_x4`]) — the matrix-expansion and PRF
-//! pattern of a lattice KEM; otherwise each lane falls back to the scalar
-//! hasher. Either way the output is bit-identical to the per-stream
-//! [`Shake128`] / [`Shake256`], so a caller can cross-check the batched path
-//! against the scalar one.
+//! The API is the XOF wrapper of [FIPS 203 Section 4.1]: `new` is
+//! `XOF.Init()`, `update` is `XOF.Absorb` (repeatable), and `finalize_xof`
+//! yields a reader whose `squeeze` is `XOF.Squeeze` (repeatable, per-lane
+//! lengths) — mirroring the single-stream [`Shake128`] / [`Shake256`]
+//! convention, four lanes at a time.
+//!
+//! While every `update` call passes four equal-length slices the lanes run in
+//! lockstep on the batched permutation ([`permute_x4`]) — the matrix-expansion
+//! and PRF pattern of a lattice KEM. An unequal-length `update` splits the
+//! lanes into four scalar sponges from that point on. Either way the output is
+//! bit-identical to the per-stream hashers, so a caller can cross-check the
+//! batched path against the scalar one.
+//!
+//! [FIPS 203 Section 4.1]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#section.4.1
 
 use crate::{
-    backend::permute_x4,
-    shake::{SHAKE_DOMAIN, Shake128, Shake128Reader, Shake256, Shake256Reader},
+    backend::{State, permute_x4},
+    shake::SHAKE_DOMAIN,
+    sponge::Sponge,
 };
 
 #[cfg(test)]
 mod tests;
 
-/// Returns whether all four inputs share a length (the batched precondition).
+/// Returns whether all four inputs share a length (the lockstep condition).
 fn equal_lengths(inputs: &[&[u8]; 4]) -> bool {
     #[allow(
         clippy::indexing_slicing,
@@ -29,9 +38,10 @@ fn equal_lengths(inputs: &[&[u8]; 4]) -> bool {
 /// Four `Keccak-f[1600]` states absorbed and squeezed in lockstep at a
 /// `RATE`-byte rate.
 ///
-/// Used only when the four inputs share a length, so every lane crosses its
-/// rate-block boundaries and finalizes at the same offset; the permutation then
-/// advances all four at once via [`permute_x4`].
+/// Valid only while every absorb call carries equal-length inputs, so every
+/// lane crosses its rate-block boundaries and finalizes at the same offset;
+/// the permutation then advances all four at once via [`permute_x4`].
+#[derive(Clone)]
 struct SpongeX4<const RATE: usize> {
     /// One state per lane, lane `x + 5*y` little-endian.
     states: [[u64; 25]; 4],
@@ -41,40 +51,45 @@ struct SpongeX4<const RATE: usize> {
 }
 
 impl<const RATE: usize> SpongeX4<RATE> {
-    /// Absorbs one equal-length input per lane, applies pad10*1 with `domain`,
-    /// and permutes into the squeezing phase.
+    /// Returns four empty lockstep lanes.
+    const fn new() -> Self {
+        Self {
+            states: [[0u64; 25]; 4],
+            offset: 0,
+        }
+    }
+
+    /// Absorbs one equal-length input per lane, permuting after each full
+    /// rate block. The caller guarantees equal lengths.
     #[allow(
         clippy::indexing_slicing,
         clippy::needless_range_loop,
         reason = "lockstep absorb indexes four parallel lanes by byte position"
     )]
-    fn absorb_finalize(inputs: [&[u8]; 4], domain: u8) -> Self {
-        let mut sponge = Self {
-            states: [[0u64; 25]; 4],
-            offset: 0,
-        };
-
+    fn absorb(&mut self, inputs: &[&[u8]; 4]) {
         for j in 0..inputs[0].len() {
             for lane in 0..4 {
-                sponge.xor_byte(lane, sponge.offset, inputs[lane][j]);
+                self.xor_byte(lane, self.offset, inputs[lane][j]);
             }
-            sponge.offset += 1;
+            self.offset += 1;
 
-            if sponge.offset == RATE {
-                permute_x4(&mut sponge.states);
-                sponge.offset = 0;
+            if self.offset == RATE {
+                permute_x4(&mut self.states);
+                self.offset = 0;
             }
         }
+    }
 
+    /// Applies pad10*1 with `domain` to every lane and permutes, switching
+    /// the lanes to squeezing.
+    fn finalize(&mut self, domain: u8) {
         for lane in 0..4 {
-            sponge.xor_byte(lane, sponge.offset, domain);
-            sponge.xor_byte(lane, RATE - 1, 0x80);
+            self.xor_byte(lane, self.offset, domain);
+            self.xor_byte(lane, RATE - 1, 0x80);
         }
 
-        permute_x4(&mut sponge.states);
-        sponge.offset = 0;
-
-        sponge
+        permute_x4(&mut self.states);
+        self.offset = 0;
     }
 
     /// Squeezes into each `out[lane]`, permuting between rate blocks.
@@ -116,94 +131,218 @@ impl<const RATE: usize> SpongeX4<RATE> {
     }
 }
 
-/// Four independent SHAKE128 streams (ML-KEM's `SampleNTT` matrix expansion).
-pub struct Shake128X4 {
-    /// Batched when the seeds share a length, else four scalar lanes.
-    inner: Inner128,
+impl<const RATE: usize> From<SpongeX4<RATE>> for [Sponge<RATE>; 4] {
+    /// Splits the lockstep lanes into four scalar sponges (an unequal-length
+    /// `update` ending the lockstep).
+    fn from(sponge: SpongeX4<RATE>) -> Self {
+        let offset = sponge.offset;
+
+        sponge
+            .states
+            .map(|lanes| Sponge::from_parts(State::from(lanes), offset))
+    }
 }
 
-/// The two `Shake128X4` execution paths.
-enum Inner128 {
-    /// The lockstep two-way-batched sponge (equal-length seeds).
-    Batched(SpongeX4<168>),
+/// The absorbing phase shared by both batched widths: lockstep while every
+/// `update` carries equal lengths, four scalar sponges after the first that
+/// does not.
+#[derive(Clone)]
+enum Absorbing<const RATE: usize> {
+    /// The lockstep batched sponge.
+    Lockstep(SpongeX4<RATE>),
 
-    /// One scalar reader per lane (unequal-length seeds).
-    Scalar([Shake128Reader; 4]),
+    /// One scalar sponge per lane.
+    Lanes([Sponge<RATE>; 4]),
 }
 
-impl Shake128X4 {
-    /// Absorbs one seed per lane and finalizes, returning the batched reader.
-    #[must_use]
-    pub fn absorb(seeds: [&[u8]; 4]) -> Self {
-        let inner = if equal_lengths(&seeds) {
-            Inner128::Batched(SpongeX4::absorb_finalize(seeds, SHAKE_DOMAIN))
-        } else {
-            Inner128::Scalar(seeds.map(|seed| {
-                let mut hasher = Shake128::new();
-                hasher.update(seed);
-
-                hasher.finalize_xof()
-            }))
-        };
-
-        Self { inner }
+impl<const RATE: usize> Absorbing<RATE> {
+    /// Returns the empty (lockstep) absorbing state.
+    const fn new() -> Self {
+        Self::Lockstep(SpongeX4::new())
     }
 
-    /// Fills each `out[i]` with the next output bytes of lane `i`.
-    pub fn squeeze(&mut self, out: [&mut [u8]; 4]) {
-        match &mut self.inner {
-            Inner128::Batched(sponge) => sponge.squeeze(out),
-            Inner128::Scalar(readers) => {
-                for (reader, slot) in readers.iter_mut().zip(out) {
-                    reader.read(slot);
+    /// Absorbs one input per lane, leaving lockstep on unequal lengths.
+    fn update(&mut self, inputs: [&[u8]; 4]) {
+        match self {
+            Self::Lockstep(sponge) if equal_lengths(&inputs) => sponge.absorb(&inputs),
+            Self::Lockstep(sponge) => {
+                let mut lanes =
+                    <[Sponge<RATE>; 4]>::from(core::mem::replace(sponge, SpongeX4::new()));
+                for (lane, input) in lanes.iter_mut().zip(inputs) {
+                    lane.absorb(input);
+                }
+
+                *self = Self::Lanes(lanes);
+            }
+            Self::Lanes(lanes) => {
+                for (lane, input) in lanes.iter_mut().zip(inputs) {
+                    lane.absorb(input);
                 }
             }
         }
+    }
+
+    /// Applies pad10*1 to every lane, entering the squeezing phase.
+    fn finalize(self, domain: u8) -> Squeezing<RATE> {
+        match self {
+            Self::Lockstep(mut sponge) => {
+                sponge.finalize(domain);
+
+                Squeezing::Lockstep(sponge)
+            }
+            Self::Lanes(mut lanes) => {
+                for lane in &mut lanes {
+                    lane.finalize(domain);
+                }
+
+                Squeezing::Lanes(lanes)
+            }
+        }
+    }
+}
+
+/// The squeezing phase shared by both batched widths.
+#[derive(Clone)]
+enum Squeezing<const RATE: usize> {
+    /// The lockstep batched sponge.
+    Lockstep(SpongeX4<RATE>),
+
+    /// One scalar sponge per lane.
+    Lanes([Sponge<RATE>; 4]),
+}
+
+impl<const RATE: usize> Squeezing<RATE> {
+    /// Fills each `out[i]` with the next output bytes of lane `i`.
+    fn squeeze(&mut self, out: [&mut [u8]; 4]) {
+        match self {
+            Self::Lockstep(sponge) => sponge.squeeze(out),
+            Self::Lanes(lanes) => {
+                for (lane, slot) in lanes.iter_mut().zip(out) {
+                    lane.squeeze(slot);
+                }
+            }
+        }
+    }
+}
+
+/// Four independent SHAKE128 streams (ML-KEM's `SampleNTT` matrix expansion).
+#[derive(Clone)]
+pub struct Shake128X4 {
+    /// The absorbing lanes.
+    inner: Absorbing<168>,
+}
+
+impl Shake128X4 {
+    /// Returns four empty streams (`XOF.Init`).
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            inner: Absorbing::new(),
+        }
+    }
+
+    /// Absorbs one input per lane (`XOF.Absorb`); may be called repeatedly.
+    pub fn update(&mut self, inputs: [&[u8]; 4]) {
+        self.inner.update(inputs);
+    }
+
+    /// Finalizes absorption and returns a reader over the four output
+    /// streams.
+    #[must_use]
+    pub fn finalize_xof(self) -> Shake128X4Reader {
+        Shake128X4Reader {
+            inner: self.inner.finalize(SHAKE_DOMAIN),
+        }
+    }
+
+    /// Absorbs one input per lane and finalizes in one shot.
+    #[must_use]
+    pub fn absorb(inputs: [&[u8]; 4]) -> Shake128X4Reader {
+        let mut hasher = Self::new();
+        hasher.update(inputs);
+
+        hasher.finalize_xof()
+    }
+}
+
+impl Default for Shake128X4 {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Streaming reader over four finalized [`Shake128X4`] output streams.
+#[derive(Clone)]
+pub struct Shake128X4Reader {
+    /// The squeezing lanes.
+    inner: Squeezing<168>,
+}
+
+impl Shake128X4Reader {
+    /// Fills each `out[i]` with the next output bytes of lane `i`
+    /// (`XOF.Squeeze`); may be called repeatedly, with per-lane lengths.
+    pub fn squeeze(&mut self, out: [&mut [u8]; 4]) {
+        self.inner.squeeze(out);
     }
 }
 
 /// Four independent SHAKE256 streams (ML-KEM's CBD noise sampling).
+#[derive(Clone)]
 pub struct Shake256X4 {
-    /// Batched when the inputs share a length, else four scalar lanes.
-    inner: Inner256,
-}
-
-/// The two `Shake256X4` execution paths.
-enum Inner256 {
-    /// The lockstep two-way-batched sponge (equal-length inputs).
-    Batched(SpongeX4<136>),
-
-    /// One scalar reader per lane (unequal-length inputs).
-    Scalar([Shake256Reader; 4]),
+    /// The absorbing lanes.
+    inner: Absorbing<136>,
 }
 
 impl Shake256X4 {
-    /// Absorbs one input per lane and finalizes, returning the batched reader.
+    /// Returns four empty streams (`XOF.Init`).
     #[must_use]
-    pub fn absorb(inputs: [&[u8]; 4]) -> Self {
-        let inner = if equal_lengths(&inputs) {
-            Inner256::Batched(SpongeX4::absorb_finalize(inputs, SHAKE_DOMAIN))
-        } else {
-            Inner256::Scalar(inputs.map(|input| {
-                let mut hasher = Shake256::new();
-                hasher.update(input);
-
-                hasher.finalize_xof()
-            }))
-        };
-
-        Self { inner }
+    pub const fn new() -> Self {
+        Self {
+            inner: Absorbing::new(),
+        }
     }
 
-    /// Fills each `out[i]` with the next output bytes of lane `i`.
-    pub fn squeeze(&mut self, out: [&mut [u8]; 4]) {
-        match &mut self.inner {
-            Inner256::Batched(sponge) => sponge.squeeze(out),
-            Inner256::Scalar(readers) => {
-                for (reader, slot) in readers.iter_mut().zip(out) {
-                    reader.read(slot);
-                }
-            }
+    /// Absorbs one input per lane (`XOF.Absorb`); may be called repeatedly.
+    pub fn update(&mut self, inputs: [&[u8]; 4]) {
+        self.inner.update(inputs);
+    }
+
+    /// Finalizes absorption and returns a reader over the four output
+    /// streams.
+    #[must_use]
+    pub fn finalize_xof(self) -> Shake256X4Reader {
+        Shake256X4Reader {
+            inner: self.inner.finalize(SHAKE_DOMAIN),
         }
+    }
+
+    /// Absorbs one input per lane and finalizes in one shot.
+    #[must_use]
+    pub fn absorb(inputs: [&[u8]; 4]) -> Shake256X4Reader {
+        let mut hasher = Self::new();
+        hasher.update(inputs);
+
+        hasher.finalize_xof()
+    }
+}
+
+impl Default for Shake256X4 {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Streaming reader over four finalized [`Shake256X4`] output streams.
+#[derive(Clone)]
+pub struct Shake256X4Reader {
+    /// The squeezing lanes.
+    inner: Squeezing<136>,
+}
+
+impl Shake256X4Reader {
+    /// Fills each `out[i]` with the next output bytes of lane `i`
+    /// (`XOF.Squeeze`); may be called repeatedly, with per-lane lengths.
+    pub fn squeeze(&mut self, out: [&mut [u8]; 4]) {
+        self.inner.squeeze(out);
     }
 }
