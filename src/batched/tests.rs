@@ -115,6 +115,117 @@ fn shake128_x4_mid_stream_degrade_matches_scalar() {
     }
 }
 
+/// Odd-length lockstep updates hit the byte-and-word absorb paths at every
+/// alignment: entering a chunk with the cursor unaligned, sub-8-byte chunks,
+/// and a chunk crossing the rate boundary mid-word all must match scalar.
+#[test]
+#[allow(
+    clippy::indexing_slicing,
+    reason = "chunk bounds are compile-time constants within the seed length"
+)]
+fn shake128_x4_unaligned_updates_match_scalar() {
+    let seeds: [[u8; 200]; 4] =
+        core::array::from_fn(|i| core::array::from_fn(|k| (i * 11 + k * 7) as u8));
+
+    // 3: leaves the cursor unaligned; 13: enters unaligned, words, leaves
+    // unaligned; 1 and 6: byte-path only; 177: crosses the 168-byte rate
+    // boundary inside the word loop.
+    let chunks = [3usize, 13, 1, 6, 177];
+
+    let mut batched = Shake128X4::new();
+    let mut start = 0;
+    for len in chunks {
+        let [s0, s1, s2, s3] = &seeds;
+        batched.update([
+            &s0[start..start + len],
+            &s1[start..start + len],
+            &s2[start..start + len],
+            &s3[start..start + len],
+        ]);
+        start += len;
+    }
+
+    let mut reader = batched.finalize_xof();
+    let mut lanes = [[0u8; 64]; 4];
+    let [l0, l1, l2, l3] = &mut lanes;
+    reader.squeeze([l0, l1, l2, l3]);
+
+    for (lane, seed) in lanes.iter().zip(&seeds) {
+        assert_eq!(*lane, Shake128::digest::<64>(seed));
+    }
+}
+
+/// Repeated ragged squeezes — per-lane lengths straddling lane and rate
+/// boundaries, all shorter than a word, then longer reads — resume each
+/// lane's own stream: the first unequal read must degrade the reader to
+/// scalar lanes (a shared lockstep cursor would skip bytes on short lanes).
+#[test]
+#[allow(
+    clippy::indexing_slicing,
+    reason = "per-lane lengths are compile-time constants `<= 160`"
+)]
+fn shake256_x4_ragged_repeated_squeeze_matches_scalar() {
+    let inputs: [[u8; 40]; 4] = core::array::from_fn(|i| [(i as u8) * 5 + 1; 40]);
+
+    let [i0, i1, i2, i3] = &inputs;
+    let mut batched = Shake256X4::absorb([i0, i1, i2, i3]);
+    assert!(matches!(batched.inner, Squeezing::Lockstep(_)));
+    let mut scalars = inputs.map(|input| {
+        let mut hasher = Shake256::new();
+        hasher.update(&input);
+        hasher.finalize_xof()
+    });
+
+    // (3, ...): equal but sub-word, leaves the lockstep cursor unaligned;
+    // (16, ...): equal, enters unaligned, stays lockstep; (5, 3, 7, 2): all
+    // sub-word, ragged, must degrade; (7, 1, 25, 3): mixed byte/word;
+    // (160, ...): crosses the 136-byte rate boundary.
+    for (round, lens) in [
+        [3usize, 3, 3, 3],
+        [16, 16, 16, 16],
+        [5, 3, 7, 2],
+        [7, 1, 25, 3],
+        [160, 160, 160, 160],
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut lanes = [[0u8; 160]; 4];
+        let [l0, l1, l2, l3] = &mut lanes;
+        let [n0, n1, n2, n3] = lens;
+        batched.squeeze([&mut l0[..n0], &mut l1[..n1], &mut l2[..n2], &mut l3[..n3]]);
+
+        for ((lane, scalar), n) in lanes.iter().zip(scalars.iter_mut()).zip(lens) {
+            let mut expected = [0u8; 160];
+            scalar.read(&mut expected[..n]);
+            assert_eq!(*lane, expected);
+        }
+
+        // The equal-length rounds must not have left lockstep; the first
+        // ragged round must have.
+        if round < 2 {
+            assert!(matches!(batched.inner, Squeezing::Lockstep(_)));
+        } else {
+            assert!(matches!(batched.inner, Squeezing::Lanes(_)));
+        }
+    }
+}
+
+/// Equal-length updates keep the lanes in lockstep; the first unequal update
+/// (and only that) degrades them to scalar lanes. Guards the `equal_lengths`
+/// dispatch itself, which is invisible to output-equality tests (both paths
+/// are bit-identical by design).
+#[test]
+fn equal_length_updates_stay_lockstep() {
+    let mut batched = Shake128X4::new();
+    batched.update([b"aaaa", b"bbbb", b"cccc", b"dddd"]);
+    batched.update([b"e", b"f", b"g", b"h"]);
+    assert!(matches!(batched.inner, Absorbing::Lockstep(_)));
+
+    batched.update([b"i", b"jj", b"k", b"l"]);
+    assert!(matches!(batched.inner, Absorbing::Lanes(_)));
+}
+
 /// Every `Shake256X4` lane matches a scalar `Shake256` on that lane's input.
 #[test]
 fn shake256_x4_matches_scalar() {

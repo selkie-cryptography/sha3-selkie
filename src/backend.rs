@@ -91,22 +91,15 @@ impl From<[u64; 25]> for State {
 
 /// Permutes four independent states at once, for the batched sponge.
 ///
-/// Uses the four-way AVX2 permutation on x86-64, two two-way NEON permutations
-/// on aarch64 with the SHA-3 extension, and four scalar permutations otherwise,
-/// so the batched sponge is correct on every target and accelerated where a
-/// vector backend is present.
-#[cfg(sha3_selkie_avx2)]
+/// Dispatches at compile time: the four-way AVX2 permutation on x86-64, the
+/// hybrid scalar/NEON kernel on non-Apple aarch64 with the SHA-3 extension,
+/// two two-way NEON permutations on Apple cores, and four scalar
+/// permutations otherwise — one function, so every mutation of it is
+/// exercised on every CI leg regardless of which branch that leg compiles.
 pub(crate) fn permute_x4(states: &mut [[u64; 25]; 4]) {
+    #[cfg(sha3_selkie_avx2)]
     avx2::permute_x4(states);
-}
 
-/// Permutes four independent states at once, for the batched sponge.
-///
-/// See the AVX2 variant; this runs the hybrid scalar/NEON kernel on
-/// non-Apple aarch64 with the SHA-3 extension, two two-way NEON
-/// permutations on Apple cores, or four scalar permutations otherwise.
-#[cfg(not(sha3_selkie_avx2))]
-pub(crate) fn permute_x4(states: &mut [[u64; 25]; 4]) {
     #[cfg(sha3_selkie_hybrid)]
     hybrid::permute_x4(states);
 
@@ -117,7 +110,7 @@ pub(crate) fn permute_x4(states: &mut [[u64; 25]; 4]) {
         neon::permute_pair(c, d);
     }
 
-    #[cfg(not(sha3_selkie_ext))]
+    #[cfg(not(any(sha3_selkie_avx2, sha3_selkie_ext)))]
     {
         let [a, b, c, d] = states;
         scalar::permute(a);

@@ -9,4 +9,10 @@
 exclude_re = [
     # build.rs only emits cfg flags; mutating it changes nothing testable.
     "build\\.rs",
+    # The sponges' `offset % 8` alignment checks gate the whole-lane fast
+    # path; `% -> +` makes the check never/always fail so every byte takes
+    # the byte path, which is the semantic definition — output-equivalent,
+    # unkillable by correctness tests. (`% -> /` and the loop-bound mutants
+    # stay in: those reach the word path misaligned and corrupt output.)
+    "replace % with \\+ in Sponge(X4)?<RATE>::(absorb|squeeze)",
 ]
