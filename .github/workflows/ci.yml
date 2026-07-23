@@ -58,6 +58,12 @@ jobs:
           toolchain: stable
           components: clippy
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      # RUSTFLAGS without an explicit target also applies to build scripts
+      # and proc macros, which run on the host CPU; pinning the build target
+      # scopes the AVX-512 flags to target artifacts only.
+      - name: Pin the build target
+        if: matrix.backend == 'avx512'
+        run: echo "CARGO_BUILD_TARGET=x86_64-unknown-linux-gnu" >> "$GITHUB_ENV"
       - run: cargo clippy --all-targets -- -D warnings
 
   doc:
@@ -83,6 +89,12 @@ jobs:
         with:
           toolchain: stable
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      # RUSTFLAGS without an explicit target also applies to build scripts
+      # and proc macros, which run on the host CPU; pinning the build target
+      # scopes the AVX-512 flags to target artifacts only.
+      - name: Pin the build target
+        if: matrix.backend == 'avx512'
+        run: echo "CARGO_BUILD_TARGET=x86_64-unknown-linux-gnu" >> "$GITHUB_ENV"
       - run: cargo doc --no-deps --document-private-items
 
   test:
@@ -114,6 +126,12 @@ jobs:
         with:
           tool: nextest
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      # RUSTFLAGS without an explicit target also applies to build scripts
+      # and proc macros, which run on the host CPU; pinning the build target
+      # scopes the AVX-512 flags to target artifacts only.
+      - name: Pin the build target
+        if: matrix.backend == 'avx512'
+        run: echo "CARGO_BUILD_TARGET=x86_64-unknown-linux-gnu" >> "$GITHUB_ENV"
       # The avx512 leg runs its test binaries under Intel SDE, so the backend
       # is validated regardless of whether the runner's CPU has AVX-512.
       - name: Set up Intel SDE
