@@ -25,23 +25,32 @@ permissions:
 
 jobs:
   fuzz:
-    name: fuzz (${{ matrix.target }})
-    runs-on: ubuntu-latest
+    name: fuzz (${{ matrix.target }}, ${{ matrix.runner.arch }})
+    runs-on: ${{ matrix.runner.os }}
     strategy:
       fail-fast: false
+      # The arm64 leg forces sha3 so the fuzzed backend is the hybrid
+      # scalar/NEON kernel on the Neoverse runner, its deployment target.
       matrix:
         target: [differential, batched]
+        runner:
+          - { arch: x86_64, os: ubuntu-latest, triple: x86_64-unknown-linux-gnu, flags: "" }
+          - { arch: aarch64, os: ubuntu-24.04-arm, triple: aarch64-unknown-linux-gnu, flags: "-C target-feature=+sha3" }
+    env:
+      RUSTFLAGS: ${{ matrix.runner.flags }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       # Accumulate discoveries across runs on top of the committed seed corpus.
-      # Immutable key per run; restore-keys pulls the most recent prior cache.
+      # Immutable key per run; restore-keys pulls the most recent prior cache,
+      # falling back to the other arch's corpus (inputs are arch-independent).
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: fuzz/corpus/${{ matrix.target }}
-          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ matrix.runner.arch }}-${{ github.run_id }}
           restore-keys: |
+            fuzz-corpus-${{ matrix.target }}-${{ matrix.runner.arch }}-
             fuzz-corpus-${{ matrix.target }}-
       # Nightly: libFuzzer instrumentation is nightly-only.
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
@@ -56,12 +65,12 @@ jobs:
       # is installed and ASan cannot link.
       - name: Fuzz
         run: |
-          cargo fuzz run ${{ matrix.target }} --target x86_64-unknown-linux-gnu -- \
+          cargo fuzz run ${{ matrix.target }} --target ${{ matrix.runner.triple }} -- \
             -max_total_time=${{ github.event_name == 'schedule' && 900 || 120 }} \
             -rss_limit_mb=4096
       - name: Upload crash artifacts
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: fuzz-artifacts-${{ matrix.target }}
+          name: fuzz-artifacts-${{ matrix.target }}-${{ matrix.runner.arch }}
           path: fuzz/artifacts

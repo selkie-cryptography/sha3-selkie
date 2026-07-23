@@ -61,22 +61,63 @@ impl<const RATE: usize> SpongeX4<RATE> {
 
     /// Absorbs one equal-length input per lane, permuting after each full
     /// rate block. The caller guarantees equal lengths.
+    ///
+    /// Whole 8-byte lanes are XORed at once wherever the shared cursor is
+    /// lane-aligned (`RATE` is always a multiple of 8); ragged head and tail
+    /// bytes go through the byte path.
     #[allow(
         clippy::indexing_slicing,
         clippy::needless_range_loop,
         reason = "lockstep absorb indexes four parallel lanes by byte position"
     )]
     fn absorb(&mut self, inputs: &[&[u8]; 4]) {
-        for j in 0..inputs[0].len() {
+        let len = inputs[0].len();
+        let mut j = 0;
+
+        while self.offset % 8 != 0 && j < len {
+            self.absorb_byte_x4(inputs, j);
+            j += 1;
+        }
+
+        while j + 8 <= len {
             for lane in 0..4 {
-                self.xor_byte(lane, self.offset, inputs[lane][j]);
+                #[allow(
+                    clippy::unwrap_used,
+                    reason = "`j + 8 <= len` makes the slice exactly 8 bytes"
+                )]
+                let word = u64::from_le_bytes(inputs[lane][j..j + 8].try_into().unwrap());
+                self.states[lane][self.offset / 8] ^= word;
             }
-            self.offset += 1;
+            self.offset += 8;
+            j += 8;
 
             if self.offset == RATE {
                 permute_x4(&mut self.states);
                 self.offset = 0;
             }
+        }
+
+        while j < len {
+            self.absorb_byte_x4(inputs, j);
+            j += 1;
+        }
+    }
+
+    /// Absorbs byte `j` of every lane at the shared cursor, permuting on a
+    /// full rate block.
+    #[allow(
+        clippy::indexing_slicing,
+        reason = "the caller bounds `j` by the shared input length"
+    )]
+    fn absorb_byte_x4(&mut self, inputs: &[&[u8]; 4], j: usize) {
+        for (lane, input) in inputs.iter().enumerate() {
+            self.xor_byte(lane, self.offset, input[j]);
+        }
+        self.offset += 1;
+
+        if self.offset == RATE {
+            permute_x4(&mut self.states);
+            self.offset = 0;
         }
     }
 
@@ -95,7 +136,9 @@ impl<const RATE: usize> SpongeX4<RATE> {
     /// Squeezes into each `out[lane]`, permuting between rate blocks.
     ///
     /// Per-lane lengths may differ: every lane advances in lockstep and only
-    /// bytes within a lane's own length are written.
+    /// bytes within a lane's own length are written. Whole 8-byte lanes are
+    /// copied at once wherever the shared cursor is lane-aligned, with a
+    /// byte path for each lane's ragged end.
     #[allow(
         clippy::indexing_slicing,
         clippy::needless_range_loop,
@@ -103,11 +146,25 @@ impl<const RATE: usize> SpongeX4<RATE> {
     )]
     fn squeeze(&mut self, out: [&mut [u8]; 4]) {
         let longest = out.iter().map(|slot| slot.len()).max().unwrap_or(0);
+        let mut j = 0;
 
-        for j in 0..longest {
+        while j < longest {
             if self.offset == RATE {
                 permute_x4(&mut self.states);
                 self.offset = 0;
+            }
+
+            if self.offset % 8 == 0 && j + 8 <= longest {
+                for lane in 0..4 {
+                    let word = self.states[lane][self.offset / 8];
+                    let end = out[lane].len().clamp(j, j + 8);
+                    for (byte, slot) in word.to_le_bytes().iter().zip(&mut out[lane][j..end]) {
+                        *slot = *byte;
+                    }
+                }
+                self.offset += 8;
+                j += 8;
+                continue;
             }
 
             for lane in 0..4 {
@@ -116,8 +173,8 @@ impl<const RATE: usize> SpongeX4<RATE> {
                     out[lane][j] = (word >> (8 * (self.offset % 8))) as u8;
                 }
             }
-
             self.offset += 1;
+            j += 1;
         }
     }
 
