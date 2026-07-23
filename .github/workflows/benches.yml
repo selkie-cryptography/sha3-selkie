@@ -37,12 +37,16 @@ jobs:
     strategy:
       fail-fast: false
       # One leg per vector backend: two-way NEON on aarch64 macOS, four-way AVX2
-      # on x86. `flags` forces each backend's feature explicitly — sha3 is an
-      # Apple default, avx2 is not — so the active backend is visible here.
+      # on x86, and the hybrid scalar/NEON kernel on the arm64 Linux runner
+      # (Cobalt 100 / Neoverse N2 — a core where SHA-3 ops share SIMD units,
+      # the case the hybrid exists for). `flags` forces each backend's feature
+      # explicitly — sha3 is an Apple default, avx2 is not — so the active
+      # backend is visible here.
       matrix:
         include:
           - { backend: neon, os: macos-latest, flags: "-C target-feature=+sha3" }
           - { backend: avx2, os: ubuntu-latest, flags: "-C target-feature=+avx2" }
+          - { backend: hybrid, os: ubuntu-24.04-arm, flags: "-C target-feature=+sha3" }
     env:
       RUSTFLAGS: ${{ matrix.flags }}
     steps:

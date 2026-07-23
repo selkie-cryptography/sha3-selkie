@@ -1,14 +1,19 @@
 //! Arm SHA-3 extension `Keccak-f[1600]` backends.
 //!
-//! Single-stream stays on the scalar permutation: rho's 25 rotation offsets are
-//! all distinct, so `XAR` (one shared rotate immediate per vector) cannot
-//! parallelize it, and Apple's scalar rotates already saturate that step.
+//! [`permute`] runs the single stream through the same two-way kernel with a
+//! dead second lane: the fused `EOR3`/`RAX1`/`XAR`/`BCAX` round body beats
+//! Apple's scalar rotates by ~26% even paying the wasted lane (measured on
+//! M4 Max; the earlier assumption that scalar saturates single-stream was
+//! wrong). Non-Apple aarch64 keeps scalar single-stream — with SHA-3 ops on
+//! a subset of SIMD units the trade flips (see `build.rs` and `backend.rs`).
 //!
 //! [`permute_pair`] takes the batched path: two independent Keccak states
 //! packed into the two lanes of every vector, where the same lane position
 //! shares a rho offset. `EOR3`, `RAX1`, `XAR`, and `BCAX` then each advance
 //! both states at once with no cross-lane shuffles — the two-way permutation
-//! behind the `Shake128X4` / `Shake256X4` matrix-expansion and PRF paths.
+//! behind the `Shake128X4` / `Shake256X4` matrix-expansion and PRF paths on
+//! Apple cores (non-Apple aarch64 batches via the `hybrid` module instead,
+//! where SHA-3 ops share SIMD units and the scalar pipes are worth filling).
 
 use core::arch::aarch64::{
     uint64x2_t, vbcaxq_u64, vdupq_n_u64, veor3q_u64, veorq_u64, vgetq_lane_u64, vrax1q_u64,
@@ -19,16 +24,40 @@ use super::scalar::ROUND_CONSTANTS;
 
 /// Applies the single-stream 24-round permutation in place.
 ///
-/// Delegates to the scalar backend: a single-stream `XAR` wastes a lane, so it
-/// cannot beat the scalar rotates on this microarchitecture.
+/// Broadcasts each lane into both halves of a vector (cheaper than packing a
+/// second state) and runs the two-way kernel; lane 1 computes a duplicate
+/// that is never read back.
+// On `sha3_selkie_hybrid` builds `State::permute` stays scalar; this is the
+// Apple-core path and the backend tests' cross-check.
+#[cfg_attr(sha3_selkie_hybrid, allow(dead_code))]
+#[allow(
+    clippy::indexing_slicing,
+    reason = "every index is a compile-time lane constant `< 25`"
+)]
 pub(crate) fn permute(lanes: &mut [u64; 25]) {
-    super::scalar::permute(lanes);
+    // SAFETY: `sha3_selkie_ext` is set only when the target enables the `sha3`
+    // feature, so the FEAT_SHA3 intrinsics below are always available here.
+    unsafe {
+        let mut s = [vdupq_n_u64(0); 25];
+        for i in 0..25 {
+            s[i] = vdupq_n_u64(lanes[i]);
+        }
+
+        keccak_f1600_x2(&mut s);
+
+        for i in 0..25 {
+            lanes[i] = vgetq_lane_u64::<0>(s[i]);
+        }
+    }
 }
 
 /// Permutes two independent states together, one per vector lane.
 ///
 /// Packs `a` into lane 0 and `b` into lane 1, runs the two-way permutation, and
 /// writes the results back. The pack/unpack is amortized over the 24 rounds.
+// On `sha3_selkie_hybrid` builds `permute_x4` dispatches to the hybrid kernel;
+// this stays as the Apple-core path and the backend tests' cross-check.
+#[cfg_attr(sha3_selkie_hybrid, allow(dead_code))]
 #[allow(
     clippy::indexing_slicing,
     reason = "every index is a compile-time lane constant `< 25`"

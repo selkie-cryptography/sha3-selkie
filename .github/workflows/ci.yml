@@ -38,7 +38,8 @@ jobs:
     strategy:
       fail-fast: false
       # One leg per Keccak backend: portable (scalar) on x86, four-way AVX2 on
-      # x86, two-way NEON on aarch64 macOS. `flags` forces each backend's feature
+      # x86, two-way NEON on aarch64 macOS, hybrid scalar/NEON on arm64 Linux
+      # (non-Apple vendor selects it). `flags` forces each backend's feature
       # explicitly — sha3 is an Apple default, avx2 is not — so the active
       # backend is visible rather than relying on a target default.
       matrix:
@@ -46,6 +47,7 @@ jobs:
           - { backend: portable, os: ubuntu-latest, flags: "" }
           - { backend: avx2, os: ubuntu-latest, flags: "-C target-feature=+avx2" }
           - { backend: neon, os: macos-latest, flags: "-C target-feature=+sha3" }
+          - { backend: hybrid, os: ubuntu-24.04-arm, flags: "-C target-feature=+sha3" }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -67,6 +69,7 @@ jobs:
           - { backend: portable, os: ubuntu-latest, flags: "" }
           - { backend: avx2, os: ubuntu-latest, flags: "-C target-feature=+avx2" }
           - { backend: neon, os: macos-latest, flags: "-C target-feature=+sha3" }
+          - { backend: hybrid, os: ubuntu-24.04-arm, flags: "-C target-feature=+sha3" }
     env:
       RUSTDOCFLAGS: -D warnings
       RUSTFLAGS: ${{ matrix.flags }}
@@ -87,14 +90,16 @@ jobs:
       RUSTFLAGS: ${{ matrix.flags }}
     strategy:
       fail-fast: false
-      # The AVX2 and NEON legs run the batched permutation against the same
-      # known-answer and differential vectors on the arch where it is selected,
-      # so `permute_x4` is validated on real x86 and aarch64 hardware.
+      # The AVX2, NEON, and hybrid legs run the batched permutation against the
+      # same known-answer and differential vectors on the arch where each is
+      # selected, so `permute_x4` is validated on real x86 and aarch64 hardware
+      # (the hybrid leg on a Neoverse-class core, its actual deployment target).
       matrix:
         include:
           - { backend: portable, os: ubuntu-latest, flags: "" }
           - { backend: avx2, os: ubuntu-latest, flags: "-C target-feature=+avx2" }
           - { backend: neon, os: macos-latest, flags: "-C target-feature=+sha3" }
+          - { backend: hybrid, os: ubuntu-24.04-arm, flags: "-C target-feature=+sha3" }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -139,8 +144,12 @@ jobs:
 
   no-std:
     name: no_std build
-    # Builds the library for a bare-metal target with no `std`, proving the
+    # Builds the library for bare-metal targets with no `std`, proving the
     # `#![no_std]` claim (dev-dependencies are std but are not compiled here).
+    # The aarch64 leg forces sha3 so the hybrid backend's global_asm! kernel
+    # is proven no_std too (vendor "unknown" selects it), in release because
+    # module-level asm assembles differently there (see the .arch note in
+    # src/backend/keccak_x4_hybrid.s).
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -149,5 +158,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         with:
           toolchain: stable
-          targets: thumbv7em-none-eabi
+          targets: thumbv7em-none-eabi, aarch64-unknown-none
       - run: cargo build --target thumbv7em-none-eabi
+      - run: cargo build --release --target aarch64-unknown-none
+        env:
+          RUSTFLAGS: "-C target-feature=+neon,+sha3"

@@ -21,6 +21,13 @@ mod neon;
 #[allow(unsafe_code, reason = "the batched backend needs AVX2 intrinsics")]
 mod avx2;
 
+#[cfg(sha3_selkie_hybrid)]
+#[allow(
+    unsafe_code,
+    reason = "the hybrid backend is a generated scalar/NEON asm kernel"
+)]
+mod hybrid;
+
 /// The `Keccak-f[1600]` permutation state: 25 lanes of 64 bits, lane `(x, y)`
 /// at index `x + 5*y`, each stored little-endian.
 #[derive(Clone)]
@@ -62,11 +69,16 @@ impl State {
 
     /// Applies the 24-round `Keccak-f[1600]` permutation in place, dispatching
     /// to the accelerated backend selected at compile time.
+    ///
+    /// Single-stream goes vector only on Apple cores (SHA-3 ops on every SIMD
+    /// unit make the dead-lane two-way kernel ~26% faster than scalar there);
+    /// hybrid targets keep scalar, where the constrained SHA-3 pipes lose to
+    /// the scalar ALUs on a single stream.
     pub(crate) fn permute(&mut self) {
-        #[cfg(sha3_selkie_ext)]
+        #[cfg(all(sha3_selkie_ext, not(sha3_selkie_hybrid)))]
         neon::permute(&mut self.lanes);
 
-        #[cfg(not(sha3_selkie_ext))]
+        #[cfg(not(all(sha3_selkie_ext, not(sha3_selkie_hybrid))))]
         scalar::permute(&mut self.lanes);
     }
 }
@@ -90,20 +102,24 @@ pub(crate) fn permute_x4(states: &mut [[u64; 25]; 4]) {
 
 /// Permutes four independent states at once, for the batched sponge.
 ///
-/// See the AVX2 variant; this runs two two-way NEON permutations, or four
-/// scalar permutations off the SHA-3 extension.
+/// See the AVX2 variant; this runs the hybrid scalar/NEON kernel on
+/// non-Apple aarch64 with the SHA-3 extension, two two-way NEON
+/// permutations on Apple cores, or four scalar permutations otherwise.
 #[cfg(not(sha3_selkie_avx2))]
 pub(crate) fn permute_x4(states: &mut [[u64; 25]; 4]) {
-    let [a, b, c, d] = states;
+    #[cfg(sha3_selkie_hybrid)]
+    hybrid::permute_x4(states);
 
-    #[cfg(sha3_selkie_ext)]
+    #[cfg(all(sha3_selkie_ext, not(sha3_selkie_hybrid)))]
     {
+        let [a, b, c, d] = states;
         neon::permute_pair(a, b);
         neon::permute_pair(c, d);
     }
 
     #[cfg(not(sha3_selkie_ext))]
     {
+        let [a, b, c, d] = states;
         scalar::permute(a);
         scalar::permute(b);
         scalar::permute(c);

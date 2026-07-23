@@ -16,9 +16,10 @@ permissions:
 # Per-arch legs run with that arch's backend feature forced on (sha3 is an
 # Apple default, avx2 is not — forcing keeps the active backend visible), so
 # backend mutants are exercised where their code compiles. Each leg excludes
-# the other arch's backend file: cargo-mutants walks source with syn
-# (cfg-blind), so it would emit mutants for the cfg'd-out file, and those
-# survive trivially.
+# the other legs' backend files: cargo-mutants walks source with syn
+# (cfg-blind), so it would emit mutants for a cfg'd-out file, and those
+# survive trivially. The hybrid backend compiles only on non-Apple aarch64,
+# so its mutants run on the arm64 Linux leg.
 jobs:
   incremental:
     name: cargo-mutants (changed code, ${{ matrix.arch }})
@@ -30,11 +31,15 @@ jobs:
           - arch: x86_64
             os: ubuntu-latest
             flags: "-C target-feature=+avx2"
-            exclude: src/backend/neon.rs
-          - arch: aarch64
+            exclude: "src/backend/neon.rs src/backend/hybrid.rs"
+          - arch: aarch64-apple
             os: macos-latest
             flags: "-C target-feature=+sha3"
-            exclude: src/backend/avx2.rs
+            exclude: "src/backend/avx2.rs src/backend/hybrid.rs"
+          - arch: aarch64-hybrid
+            os: ubuntu-24.04-arm
+            flags: "-C target-feature=+sha3"
+            exclude: "src/backend/avx2.rs"
     runs-on: ${{ matrix.os }}
     env:
       RUSTFLAGS: ${{ matrix.flags }}
@@ -53,7 +58,9 @@ jobs:
       - name: Mutate the PR diff
         run: |
           git diff "origin/${{ github.base_ref }}" -- . > pr.diff
-          cargo mutants --in-diff pr.diff --test-tool nextest --exclude "${{ matrix.exclude }}"
+          args=()
+          for f in ${{ matrix.exclude }}; do args+=(--exclude "$f"); done
+          cargo mutants --in-diff pr.diff --test-tool nextest "${args[@]}"
 
   # Weekly full-tree run on both arches, so every backend's mutations are
   # exercised on the arch where its code actually compiles.
@@ -67,11 +74,15 @@ jobs:
           - arch: x86_64
             os: ubuntu-latest
             flags: "-C target-feature=+avx2"
-            exclude: src/backend/neon.rs
-          - arch: aarch64
+            exclude: "src/backend/neon.rs src/backend/hybrid.rs"
+          - arch: aarch64-apple
             os: macos-latest
             flags: "-C target-feature=+sha3"
-            exclude: src/backend/avx2.rs
+            exclude: "src/backend/avx2.rs src/backend/hybrid.rs"
+          - arch: aarch64-hybrid
+            os: ubuntu-24.04-arm
+            flags: "-C target-feature=+sha3"
+            exclude: "src/backend/avx2.rs"
     runs-on: ${{ matrix.os }}
     env:
       RUSTFLAGS: ${{ matrix.flags }}
@@ -86,4 +97,7 @@ jobs:
         with:
           tool: cargo-mutants,cargo-nextest
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-      - run: cargo mutants --test-tool nextest --exclude "${{ matrix.exclude }}"
+      - run: |
+          args=()
+          for f in ${{ matrix.exclude }}; do args+=(--exclude "$f"); done
+          cargo mutants --test-tool nextest "${args[@]}"

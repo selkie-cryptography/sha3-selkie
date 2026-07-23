@@ -60,10 +60,8 @@ fn permute_x4_matches_scalar() {
     }
 }
 
-/// The single-stream backend matches the scalar reference on every state.
-///
-/// It delegates to scalar today, so this passes trivially; it stays as a guard
-/// against a future single-stream backend diverging.
+/// The single-stream vector backend (the dead-lane two-way kernel) matches
+/// the scalar reference on every state.
 #[cfg(sha3_selkie_ext)]
 #[test]
 fn ext_backend_matches_scalar() {
