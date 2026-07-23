@@ -60,7 +60,14 @@ jobs:
           git diff "origin/${{ github.base_ref }}" -- . > pr.diff
           args=()
           for f in ${{ matrix.exclude }}; do args+=(--exclude "$f"); done
-          cargo mutants --in-diff pr.diff --test-tool nextest "${args[@]}"
+          status=0
+          cargo mutants --in-diff pr.diff --test-tool nextest "${args[@]}" || status=$?
+          # Exit 3 means a mutant hung the tests: an infinite-loop mutant is
+          # killed by the timeout, not missed. But timeout outranks missed in
+          # cargo-mutants' exit code, so accept it only when nothing was also
+          # missed.
+          if [ "$status" -eq 3 ] && [ ! -s mutants.out/missed.txt ]; then status=0; fi
+          exit "$status"
 
   # Weekly full-tree run on both arches, so every backend's mutations are
   # exercised on the arch where its code actually compiles.
@@ -100,4 +107,9 @@ jobs:
       - run: |
           args=()
           for f in ${{ matrix.exclude }}; do args+=(--exclude "$f"); done
-          cargo mutants --test-tool nextest "${args[@]}"
+          status=0
+          cargo mutants --test-tool nextest "${args[@]}" || status=$?
+          # As in the incremental job: timeouts are kills, but only accepted
+          # when nothing was also missed.
+          if [ "$status" -eq 3 ] && [ ! -s mutants.out/missed.txt ]; then status=0; fi
+          exit "$status"
