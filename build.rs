@@ -22,6 +22,7 @@ fn main() {
     println!("cargo::rerun-if-env-changed=CARGO_CFG_TARGET_ARCH");
     println!("cargo::rerun-if-env-changed=CARGO_CFG_TARGET_FEATURE");
     println!("cargo::rerun-if-env-changed=SHA3_SELKIE_FORCE_HYBRID");
+    println!("cargo::rerun-if-env-changed=SHA3_SELKIE_NO_HYBRID");
 
     let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
     let target_vendor = env::var("CARGO_CFG_TARGET_VENDOR").unwrap_or_default();
@@ -38,9 +39,13 @@ fn main() {
                 // Apple cores run the SHA-3 instructions on every SIMD unit,
                 // so the pure-NEON two-way pairs win there; everywhere else
                 // the batched path takes the hybrid scalar/NEON kernel.
-                // SHA3_SELKIE_FORCE_HYBRID overrides for local testing.
-                let force = env::var_os("SHA3_SELKIE_FORCE_HYBRID").is_some();
-                if target_vendor != "apple" || force {
+                // SHA3_SELKIE_FORCE_HYBRID / SHA3_SELKIE_NO_HYBRID override
+                // either way, for testing and A/B benching on one machine
+                // (non-empty means set: CI matrices pass "" for unset legs).
+                let env_set = |name: &str| env::var(name).is_ok_and(|v| !v.is_empty());
+                let force = env_set("SHA3_SELKIE_FORCE_HYBRID");
+                let suppress = env_set("SHA3_SELKIE_NO_HYBRID");
+                if (target_vendor != "apple" || force) && !suppress {
                     println!("cargo::rustc-cfg=sha3_selkie_hybrid");
                 }
             }

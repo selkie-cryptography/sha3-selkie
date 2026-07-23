@@ -42,13 +42,17 @@ jobs:
       # the case the hybrid exists for). `flags` forces each backend's feature
       # explicitly — sha3 is an Apple default, avx2 is not — so the active
       # backend is visible here.
+      # The neon-pairs leg suppresses the hybrid on the same arm64 runner so
+      # hybrid vs pure-NEON pairs is an A/B on identical Neoverse hardware.
       matrix:
         include:
           - { backend: neon, os: macos-latest, flags: "-C target-feature=+sha3" }
           - { backend: avx2, os: ubuntu-latest, flags: "-C target-feature=+avx2" }
           - { backend: hybrid, os: ubuntu-24.04-arm, flags: "-C target-feature=+sha3" }
+          - { backend: neon-pairs, os: ubuntu-24.04-arm, flags: "-C target-feature=+sha3", no_hybrid: "1" }
     env:
       RUSTFLAGS: ${{ matrix.flags }}
+      SHA3_SELKIE_NO_HYBRID: ${{ matrix.no_hybrid }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

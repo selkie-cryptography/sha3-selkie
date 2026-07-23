@@ -3,8 +3,8 @@
 //! The API is the XOF wrapper of [FIPS 203 Section 4.1]: `new` is
 //! `XOF.Init()`, `update` is `XOF.Absorb` (repeatable), and `finalize_xof`
 //! yields a reader whose `squeeze` is `XOF.Squeeze` (repeatable, per-lane
-//! lengths) — mirroring the single-stream [`Shake128`] / [`Shake256`]
-//! convention, four lanes at a time.
+//! lengths) — mirroring the single-stream [`Shake128`](crate::Shake128) /
+//! [`Shake256`](crate::Shake256) convention, four lanes at a time.
 //!
 //! While every `update` call passes four equal-length slices the lanes run in
 //! lockstep on the batched permutation ([`permute_x4`]) — the matrix-expansion
