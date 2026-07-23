@@ -50,6 +50,7 @@ jobs:
           - { backend: avx2, os: ubuntu-latest, flags: "-C target-feature=+avx2" }
           - { backend: hybrid, os: ubuntu-24.04-arm, flags: "-C target-feature=+sha3" }
           - { backend: neon-pairs, os: ubuntu-24.04-arm, flags: "-C target-feature=+sha3", no_hybrid: "1" }
+          - { backend: avx512, os: ubuntu-latest, flags: "-C target-feature=+avx2,+avx512f,+avx512vl" }
     env:
       RUSTFLAGS: ${{ matrix.flags }}
       SHA3_SELKIE_NO_HYBRID: ${{ matrix.no_hybrid }}
@@ -62,7 +63,14 @@ jobs:
           toolchain: stable
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Run benchmarks
-        run: cargo bench --bench hash_functions | tee bench-results.txt
+        # The avx512 leg is opportunistic: hosted runners have AVX-512 only on
+        # some CPU generations, and emulated numbers would be meaningless.
+        run: |
+          if [ "${{ matrix.backend }}" = "avx512" ] && ! grep -q avx512f /proc/cpuinfo; then
+            echo "runner CPU lacks AVX-512; benchmarks skipped" | tee bench-results.txt
+            exit 0
+          fi
+          cargo bench --bench hash_functions | tee bench-results.txt
       - name: Publish to job summary
         run: |
           {

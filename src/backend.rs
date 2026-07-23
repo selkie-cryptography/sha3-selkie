@@ -17,9 +17,13 @@ mod scalar;
 )]
 mod neon;
 
-#[cfg(sha3_selkie_avx2)]
+#[cfg(all(sha3_selkie_avx2, not(sha3_selkie_avx512)))]
 #[allow(unsafe_code, reason = "the batched backend needs AVX2 intrinsics")]
 mod avx2;
+
+#[cfg(sha3_selkie_avx512)]
+#[allow(unsafe_code, reason = "the batched backend needs AVX-512 intrinsics")]
+mod avx512;
 
 #[cfg(sha3_selkie_hybrid)]
 #[allow(
@@ -67,13 +71,9 @@ impl State {
         }
     }
 
-    /// Applies the 24-round `Keccak-f[1600]` permutation in place, dispatching
-    /// to the accelerated backend selected at compile time.
-    ///
-    /// Single-stream goes vector only on Apple cores (SHA-3 ops on every SIMD
-    /// unit make the dead-lane two-way kernel ~26% faster than scalar there);
-    /// hybrid targets keep scalar, where the constrained SHA-3 pipes lose to
-    /// the scalar ALUs on a single stream.
+    /// Applies the 24-round `Keccak-f[1600]` permutation in place: the
+    /// dead-lane vector kernel on Apple cores, scalar elsewhere (constrained
+    /// SHA-3 pipes lose to the scalar ALUs on a single stream).
     pub(crate) fn permute(&mut self) {
         #[cfg(all(sha3_selkie_ext, not(sha3_selkie_hybrid)))]
         neon::permute(&mut self.lanes);
@@ -91,13 +91,15 @@ impl From<[u64; 25]> for State {
 
 /// Permutes four independent states at once, for the batched sponge.
 ///
-/// Dispatches at compile time: the four-way AVX2 permutation on x86-64, the
-/// hybrid scalar/NEON kernel on non-Apple aarch64 with the SHA-3 extension,
-/// two two-way NEON permutations on Apple cores, and four scalar
-/// permutations otherwise — one function, so every mutation of it is
-/// exercised on every CI leg regardless of which branch that leg compiles.
+/// Dispatches at compile time: the four-way AVX-512 or AVX2 permutation on
+/// x86-64, the hybrid scalar/NEON kernel on non-Apple aarch64 with the
+/// SHA-3 extension, two two-way NEON permutations on Apple cores, and four
+/// scalar permutations otherwise.
 pub(crate) fn permute_x4(states: &mut [[u64; 25]; 4]) {
-    #[cfg(sha3_selkie_avx2)]
+    #[cfg(sha3_selkie_avx512)]
+    avx512::permute_x4(states);
+
+    #[cfg(all(sha3_selkie_avx2, not(sha3_selkie_avx512)))]
     avx2::permute_x4(states);
 
     #[cfg(sha3_selkie_hybrid)]

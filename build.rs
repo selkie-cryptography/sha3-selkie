@@ -18,6 +18,7 @@ fn main() {
     println!("cargo::rustc-check-cfg=cfg(sha3_selkie_arch, values(\"neon\", \"avx2\"))");
     println!("cargo::rustc-check-cfg=cfg(sha3_selkie_ext)");
     println!("cargo::rustc-check-cfg=cfg(sha3_selkie_avx2)");
+    println!("cargo::rustc-check-cfg=cfg(sha3_selkie_avx512)");
     println!("cargo::rustc-check-cfg=cfg(sha3_selkie_hybrid)");
     println!("cargo::rerun-if-env-changed=CARGO_CFG_TARGET_ARCH");
     println!("cargo::rerun-if-env-changed=CARGO_CFG_TARGET_FEATURE");
@@ -53,6 +54,11 @@ fn main() {
         "x86_64" if has_feature("avx2") => {
             println!("cargo::rustc-cfg=sha3_selkie_arch=\"avx2\"");
             println!("cargo::rustc-cfg=sha3_selkie_avx2");
+
+            // vpternlogq / vprolq need AVX-512F with the 256-bit VL forms.
+            if has_feature("avx512f") && has_feature("avx512vl") {
+                println!("cargo::rustc-cfg=sha3_selkie_avx512");
+            }
         }
         _ => {}
     }

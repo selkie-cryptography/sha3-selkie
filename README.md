@@ -46,6 +46,13 @@ The Keccak permutation is dispatched at compile time (the `sha3_selkie_ext`,
   general rotates as shift/shift/or, and the byte-aligned rho rotations
   (lanes 19 and 23) as single `vpshufb` shuffles. Unequal-length inputs fall
   back to scalar.
+- **avx512 (four-way)** — on x86-64 with AVX-512F + VL, the same four-way
+  layout at 256 bits with the richer menu: chi is one `vpternlogq` (truth
+  table `0xD2`), three-way xors one each (`0x96`), and `vprolq` rotates
+  natively — roughly half the instructions of the AVX2 round. Needs Rust
+  1.89+ when enabled (the AVX-512 intrinsics' stabilization; the default
+  configuration keeps the crate MSRV). CI validates it under Intel SDE, so
+  it is gated on every run regardless of runner CPU.
 
 ## Constant-time
 

@@ -1,19 +1,17 @@
 //! Arm SHA-3 extension `Keccak-f[1600]` backends.
 //!
-//! [`permute`] runs the single stream through the same two-way kernel with a
-//! dead second lane: the fused `EOR3`/`RAX1`/`XAR`/`BCAX` round body beats
-//! Apple's scalar rotates by ~26% even paying the wasted lane (measured on
-//! M4 Max; the earlier assumption that scalar saturates single-stream was
-//! wrong). Non-Apple aarch64 keeps scalar single-stream — with SHA-3 ops on
-//! a subset of SIMD units the trade flips (see `build.rs` and `backend.rs`).
+//! [`permute`] runs the single stream through the same two-way kernel with
+//! a dead second lane: on Apple cores the fused round body beats scalar
+//! rotates even paying the wasted lane. Non-Apple aarch64 keeps scalar
+//! single-stream, where SHA-3 ops issue on a subset of SIMD units and the
+//! trade flips.
 //!
 //! [`permute_pair`] takes the batched path: two independent Keccak states
 //! packed into the two lanes of every vector, where the same lane position
 //! shares a rho offset. `EOR3`, `RAX1`, `XAR`, and `BCAX` then each advance
 //! both states at once with no cross-lane shuffles — the two-way permutation
 //! behind the `Shake128X4` / `Shake256X4` matrix-expansion and PRF paths on
-//! Apple cores (non-Apple aarch64 batches via the `hybrid` module instead,
-//! where SHA-3 ops share SIMD units and the scalar pipes are worth filling).
+//! Apple cores; non-Apple aarch64 batches via the `hybrid` module instead.
 
 use core::arch::aarch64::{
     uint64x2_t, vbcaxq_u64, vdupq_n_u64, veor3q_u64, veorq_u64, vgetq_lane_u64, vrax1q_u64,

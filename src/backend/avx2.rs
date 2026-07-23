@@ -77,7 +77,7 @@ pub(crate) fn permute_x4(states: &mut [[u64; 25]; 4]) {
         // Pack via 4x4 transposes: four lanes of each state load as one
         // vector, unpack + cross-half permute turn state-major rows into
         // lane-major columns (the network is its own inverse; the odd lane
-        // 24 packs alone). Replaces 100 scalar inserts per call.
+        // 24 packs alone).
         let mut s = [_mm256_setzero_si256(); 25];
         for i in (0..24).step_by(4) {
             let r0 = _mm256_loadu_si256(states[0][i..].as_ptr().cast());

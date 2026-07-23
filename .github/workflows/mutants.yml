@@ -19,7 +19,9 @@ permissions:
 # the other legs' backend files: cargo-mutants walks source with syn
 # (cfg-blind), so it would emit mutants for a cfg'd-out file, and those
 # survive trivially. The hybrid backend compiles only on non-Apple aarch64,
-# so its mutants run on the arm64 Linux leg.
+# so its mutants run on the arm64 Linux leg. The AVX-512 backend is excluded
+# everywhere: no mutants leg forces AVX-512 flags (its tests need Intel SDE,
+# far too slow for a mutants run); the CI test leg covers it under SDE.
 jobs:
   incremental:
     name: cargo-mutants (changed code, ${{ matrix.arch }})
@@ -31,15 +33,15 @@ jobs:
           - arch: x86_64
             os: ubuntu-latest
             flags: "-C target-feature=+avx2"
-            exclude: "src/backend/neon.rs src/backend/hybrid.rs"
+            exclude: "src/backend/neon.rs src/backend/hybrid.rs src/backend/avx512.rs"
           - arch: aarch64-apple
             os: macos-latest
             flags: "-C target-feature=+sha3"
-            exclude: "src/backend/avx2.rs src/backend/hybrid.rs"
+            exclude: "src/backend/avx2.rs src/backend/hybrid.rs src/backend/avx512.rs"
           - arch: aarch64-hybrid
             os: ubuntu-24.04-arm
             flags: "-C target-feature=+sha3"
-            exclude: "src/backend/avx2.rs"
+            exclude: "src/backend/avx2.rs src/backend/avx512.rs"
     runs-on: ${{ matrix.os }}
     env:
       RUSTFLAGS: ${{ matrix.flags }}
@@ -81,15 +83,15 @@ jobs:
           - arch: x86_64
             os: ubuntu-latest
             flags: "-C target-feature=+avx2"
-            exclude: "src/backend/neon.rs src/backend/hybrid.rs"
+            exclude: "src/backend/neon.rs src/backend/hybrid.rs src/backend/avx512.rs"
           - arch: aarch64-apple
             os: macos-latest
             flags: "-C target-feature=+sha3"
-            exclude: "src/backend/avx2.rs src/backend/hybrid.rs"
+            exclude: "src/backend/avx2.rs src/backend/hybrid.rs src/backend/avx512.rs"
           - arch: aarch64-hybrid
             os: ubuntu-24.04-arm
             flags: "-C target-feature=+sha3"
-            exclude: "src/backend/avx2.rs"
+            exclude: "src/backend/avx2.rs src/backend/avx512.rs"
     runs-on: ${{ matrix.os }}
     env:
       RUSTFLAGS: ${{ matrix.flags }}

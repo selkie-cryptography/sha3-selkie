@@ -48,6 +48,7 @@ jobs:
           - { backend: avx2, os: ubuntu-latest, flags: "-C target-feature=+avx2" }
           - { backend: neon, os: macos-latest, flags: "-C target-feature=+sha3" }
           - { backend: hybrid, os: ubuntu-24.04-arm, flags: "-C target-feature=+sha3" }
+          - { backend: avx512, os: ubuntu-latest, flags: "-C target-feature=+avx2,+avx512f,+avx512vl" }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -70,6 +71,7 @@ jobs:
           - { backend: avx2, os: ubuntu-latest, flags: "-C target-feature=+avx2" }
           - { backend: neon, os: macos-latest, flags: "-C target-feature=+sha3" }
           - { backend: hybrid, os: ubuntu-24.04-arm, flags: "-C target-feature=+sha3" }
+          - { backend: avx512, os: ubuntu-latest, flags: "-C target-feature=+avx2,+avx512f,+avx512vl" }
     env:
       RUSTDOCFLAGS: -D warnings
       RUSTFLAGS: ${{ matrix.flags }}
@@ -100,6 +102,7 @@ jobs:
           - { backend: avx2, os: ubuntu-latest, flags: "-C target-feature=+avx2" }
           - { backend: neon, os: macos-latest, flags: "-C target-feature=+sha3" }
           - { backend: hybrid, os: ubuntu-24.04-arm, flags: "-C target-feature=+sha3" }
+          - { backend: avx512, os: ubuntu-latest, flags: "-C target-feature=+avx2,+avx512f,+avx512vl" }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -111,6 +114,16 @@ jobs:
         with:
           tool: nextest
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      # The avx512 leg runs its test binaries under Intel SDE, so the backend
+      # is validated regardless of whether the runner's CPU has AVX-512.
+      - name: Set up Intel SDE
+        if: matrix.backend == 'avx512'
+        uses: petarpetrovt/setup-sde@31aa4a8e85e109bef00f1d838613fcc6ec421271 # v5.0
+      - name: Route test binaries through SDE
+        if: matrix.backend == 'avx512'
+        run: |
+          sudo sysctl -qw kernel.yama.ptrace_scope=0
+          echo "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER=$SDE_PATH/sde64 -icl --" >> "$GITHUB_ENV"
       - name: Unit tests
         run: cargo nextest run
       # nextest does not run doctests; the README example is one, so run it.

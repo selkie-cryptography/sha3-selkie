@@ -32,18 +32,15 @@ pub(super) const ROUND_CONSTANTS: [u64; 24] = [
 
 /// Applies the 24-round permutation in place.
 ///
-/// The round body is fully unrolled with the rho rotation amounts
-/// ([FIPS 202 Section 3.2.2]) as literals: the looped form spent about as
-/// many instructions on loop and index arithmetic as on the permutation
-/// itself (measured under callgrind, ~4.3k vs ~2k per permutation), and
-/// single-stream hashing runs this function on every non-Apple target. The
-/// structure mirrors the vector backends: theta parities and D-lanes named,
-/// the theta fold + rho + pi scatter into `b`, chi per row, iota.
+/// Fully unrolled with the rho rotation amounts ([FIPS 202 Section 3.2.2])
+/// as literals; the looped form spent about as many instructions on loop
+/// and index bookkeeping as on the permutation. The structure matches the
+/// vector backends: theta parities and D-lanes named, the fold + rho + pi
+/// scatter into `b`, chi per row, iota.
 ///
 /// [FIPS 202 Section 3.2.2]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.202.pdf#subsubsection.3.2.2
-// On Apple `sha3_selkie_ext` builds production single-stream dispatches to
-// `neon::permute`; this stays as the cross-check reference the backend tests
-// compare against.
+// On Apple `sha3_selkie_ext` builds single-stream dispatches to
+// `neon::permute`; this stays as the cross-check reference.
 #[cfg_attr(
     all(sha3_selkie_ext, not(sha3_selkie_hybrid)),
     allow(dead_code, reason = "the vector single-stream path replaces this")
