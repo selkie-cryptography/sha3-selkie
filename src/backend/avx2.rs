@@ -11,9 +11,10 @@
 //! lane against the scalar reference.
 
 use core::arch::x86_64::{
-    __m256i, _mm256_andnot_si256, _mm256_extract_epi64, _mm256_or_si256, _mm256_set_epi8,
-    _mm256_set_epi64x, _mm256_set1_epi64x, _mm256_setzero_si256, _mm256_shuffle_epi8,
-    _mm256_slli_epi64, _mm256_srli_epi64, _mm256_xor_si256,
+    __m256i, _mm256_andnot_si256, _mm256_extract_epi64, _mm256_loadu_si256, _mm256_or_si256,
+    _mm256_permute2x128_si256, _mm256_set_epi8, _mm256_set_epi64x, _mm256_set1_epi64x,
+    _mm256_setzero_si256, _mm256_shuffle_epi8, _mm256_slli_epi64, _mm256_srli_epi64,
+    _mm256_storeu_si256, _mm256_unpackhi_epi64, _mm256_unpacklo_epi64, _mm256_xor_si256,
 };
 
 use super::scalar::ROUND_CONSTANTS;
@@ -73,15 +74,31 @@ pub(crate) fn permute_x4(states: &mut [[u64; 25]; 4]) {
     // SAFETY: `sha3_selkie_avx2` is set only when the target enables AVX2, so
     // the whole crate is built with AVX2 and these intrinsics are available.
     unsafe {
+        // Pack via 4x4 transposes: four lanes of each state load as one
+        // vector, unpack + cross-half permute turn state-major rows into
+        // lane-major columns (the network is its own inverse; the odd lane
+        // 24 packs alone). Replaces 100 scalar inserts per call.
         let mut s = [_mm256_setzero_si256(); 25];
-        for i in 0..25 {
-            s[i] = _mm256_set_epi64x(
-                states[3][i] as i64,
-                states[2][i] as i64,
-                states[1][i] as i64,
-                states[0][i] as i64,
-            );
+        for i in (0..24).step_by(4) {
+            let r0 = _mm256_loadu_si256(states[0][i..].as_ptr().cast());
+            let r1 = _mm256_loadu_si256(states[1][i..].as_ptr().cast());
+            let r2 = _mm256_loadu_si256(states[2][i..].as_ptr().cast());
+            let r3 = _mm256_loadu_si256(states[3][i..].as_ptr().cast());
+            let t0 = _mm256_unpacklo_epi64(r0, r1);
+            let t1 = _mm256_unpackhi_epi64(r0, r1);
+            let t2 = _mm256_unpacklo_epi64(r2, r3);
+            let t3 = _mm256_unpackhi_epi64(r2, r3);
+            s[i] = _mm256_permute2x128_si256::<0x20>(t0, t2);
+            s[i + 1] = _mm256_permute2x128_si256::<0x20>(t1, t3);
+            s[i + 2] = _mm256_permute2x128_si256::<0x31>(t0, t2);
+            s[i + 3] = _mm256_permute2x128_si256::<0x31>(t1, t3);
         }
+        s[24] = _mm256_set_epi64x(
+            states[3][24] as i64,
+            states[2][24] as i64,
+            states[1][24] as i64,
+            states[0][24] as i64,
+        );
 
         for &rc in &ROUND_CONSTANTS {
             // theta: column parities, then D = C[x-1] ^ rol(C[x+1], 1).
@@ -145,12 +162,33 @@ pub(crate) fn permute_x4(states: &mut [[u64; 25]; 4]) {
             s[0] = _mm256_xor_si256(s[0], _mm256_set1_epi64x(rc as i64));
         }
 
-        for i in 0..25 {
-            states[0][i] = _mm256_extract_epi64::<0>(s[i]) as u64;
-            states[1][i] = _mm256_extract_epi64::<1>(s[i]) as u64;
-            states[2][i] = _mm256_extract_epi64::<2>(s[i]) as u64;
-            states[3][i] = _mm256_extract_epi64::<3>(s[i]) as u64;
+        // Unpack: the same transpose network back to state-major rows.
+        for i in (0..24).step_by(4) {
+            let t0 = _mm256_unpacklo_epi64(s[i], s[i + 1]);
+            let t1 = _mm256_unpackhi_epi64(s[i], s[i + 1]);
+            let t2 = _mm256_unpacklo_epi64(s[i + 2], s[i + 3]);
+            let t3 = _mm256_unpackhi_epi64(s[i + 2], s[i + 3]);
+            _mm256_storeu_si256(
+                states[0][i..].as_mut_ptr().cast(),
+                _mm256_permute2x128_si256::<0x20>(t0, t2),
+            );
+            _mm256_storeu_si256(
+                states[1][i..].as_mut_ptr().cast(),
+                _mm256_permute2x128_si256::<0x20>(t1, t3),
+            );
+            _mm256_storeu_si256(
+                states[2][i..].as_mut_ptr().cast(),
+                _mm256_permute2x128_si256::<0x31>(t0, t2),
+            );
+            _mm256_storeu_si256(
+                states[3][i..].as_mut_ptr().cast(),
+                _mm256_permute2x128_si256::<0x31>(t1, t3),
+            );
         }
+        states[0][24] = _mm256_extract_epi64::<0>(s[24]) as u64;
+        states[1][24] = _mm256_extract_epi64::<1>(s[24]) as u64;
+        states[2][24] = _mm256_extract_epi64::<2>(s[24]) as u64;
+        states[3][24] = _mm256_extract_epi64::<3>(s[24]) as u64;
     }
 }
 
