@@ -194,3 +194,54 @@ jobs:
       - run: cargo build --release --target aarch64-unknown-none
         env:
           RUSTFLAGS: "-C target-feature=+neon,+sha3"
+
+  large-data:
+    name: Large Data Tests
+    # Gigabyte-scale streaming hashes against independent references, catching
+    # a block-boundary or offset bug that only shows at scale. Release build:
+    # the 1 GiB sweep is seconds optimized, minutes unoptimized.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - run: cargo test --release --test large_data -- --ignored
+
+  miri:
+    name: Miri (portable)
+    # Miri interprets the portable scalar backend (the vector backends are
+    # cfg'd out), catching UB the sanitizers and tests miss: aliasing
+    # violations, uninitialized reads, out-of-bounds in the sponge's manual
+    # byte-to-lane packing.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: nightly
+          components: miri
+      - run: cargo miri test --lib
+
+  big-endian:
+    name: big-endian (s390x)
+    # The sponge packs bytes to and from 64-bit lanes by hand; every CI target
+    # is little-endian, so this qemu-emulated s390x run is the only proof the
+    # from_le_bytes/to_le_bytes conversions are actually endian-correct.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: stable
+      - uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9 # v2
+        with:
+          tool: cross
+      - run: cross test --lib --target s390x-unknown-linux-gnu
