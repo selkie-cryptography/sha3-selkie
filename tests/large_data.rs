@@ -1,16 +1,13 @@
-//! ACVP-style Large Data Tests: gigabyte-scale messages hashed by streaming a
-//! repeating pattern, never materializing the whole input.
+//! ACVP-style Large Data Tests: gigabyte-scale hashes over a streamed
+//! repeating pattern, never materializing the input.
 //!
-//! The pattern is 251 bytes (prime, so it misaligns with the 136- and
-//! 168-byte rates and the 8-byte lane granularity), streamed in odd-sized
-//! chunks so rate-block boundaries fall at a different sequence than the
-//! reference generator used. This stresses the incremental absorb across
-//! millions of permutations and every intra-block offset, catching a block-
-//! boundary or offset-arithmetic bug that the short vectors miss.
+//! The 251-byte prime pattern misaligns with the 136/168-byte rates and the
+//! 8-byte lane, streamed in odd chunks so rate boundaries fall differently
+//! than in the reference generator. Stresses the incremental absorb across
+//! millions of permutations and every intra-block offset.
 //!
-//! Reference digests were generated independently with Python's `hashlib`.
-//! Ignored by default (the 1 GiB case runs for seconds to minutes); the CI
-//! constant-time / stress leg runs them with `--ignored`.
+//! Reference digests from Python `hashlib`. Ignored by default (the 1 GiB
+//! case runs for seconds); the CI leg runs them with `--ignored`.
 
 use sha3_selkie::{Sha3_256, Sha3_512, Shake128, Shake256};
 
@@ -25,11 +22,9 @@ const PATTERN: [u8; 251] = {
     p
 };
 
-/// Feeds `absorb` the first `total` bytes of the repeating pattern in
-/// odd-sized chunks (deliberately not a rate multiple).
+/// Feeds `absorb` the first `total` pattern bytes in odd-sized chunks.
 fn stream(total: usize, mut absorb: impl FnMut(&[u8])) {
-    // 4093 is prime: chunk boundaries never coincide with a rate block, so
-    // the absorb loop's partial-block handling runs on every call.
+    // Prime, so chunk boundaries never land on a rate block.
     const CHUNK: usize = 4093;
 
     let mut written = 0;
@@ -44,8 +39,7 @@ fn stream(total: usize, mut absorb: impl FnMut(&[u8])) {
     }
 }
 
-/// Reference digests for `(total_bytes, sha3_256, sha3_512, shake128_32,
-/// shake256_32)`, generated with Python `hashlib`.
+/// `(total_bytes, sha3_256, sha3_512, shake128_32, shake256_32)`.
 #[rustfmt::skip]
 const VECTORS: &[(usize, &str, &str, &str, &str)] = &[
     (1 << 20, // 1 MiB

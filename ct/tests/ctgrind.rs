@@ -1,17 +1,12 @@
-// Gated to Linux because crabgrind's build step looks up
-// <valgrind/valgrind.h> on the system include paths, absent on a stock macOS
-// install. CI runs this on the Linux image with Valgrind installed; on every
-// other target the file compiles to an empty test binary.
+// Linux-only: crabgrind needs <valgrind/valgrind.h>, absent on macOS. Compiles
+// to an empty test binary elsewhere.
 #![cfg(target_os = "linux")]
 //! Secret-dependent branch and memory-access tests via Valgrind memcheck.
 //!
-//! Marks the hashed message as "undefined" through Valgrind client requests,
-//! then hashes it. Valgrind reports an error if any branch or memory address
-//! depends on the tainted (secret) bytes. Keccak is data-oblivious by
-//! construction (no secret-dependent branch, index, or rotation amount), so
-//! every case here must report clean.
+//! Marks the hashed message undefined, then hashes it; Valgrind errors on any
+//! branch or address depending on the tainted bytes. Keccak is data-oblivious,
+//! so every case must report clean.
 //!
-//! Run with:
 //! ```text
 //! cargo test --test ctgrind --no-run
 //! valgrind --tool=memcheck --error-exitcode=1 \
@@ -23,7 +18,7 @@ use core::ffi::c_void;
 use crabgrind::memcheck::{self, MemState};
 use sha3_selkie::{Sha3_256, Sha3_512, Shake128, Shake128X4, Shake256, Shake256X4};
 
-/// Marks `data` as secret (undefined) for Valgrind; a no-op outside Valgrind.
+/// Marks `data` secret (undefined) for Valgrind.
 fn mark_secret(data: &[u8]) {
     let _ = memcheck::mark_memory(
         data.as_ptr().cast::<c_void>(),
@@ -32,8 +27,7 @@ fn mark_secret(data: &[u8]) {
     );
 }
 
-/// Marks `data` as public (defined) for Valgrind, declassifying an output so
-/// its bytes do not taint unrelated test-cleanup code.
+/// Marks `data` public (defined), declassifying an output.
 fn mark_public(data: &[u8]) {
     let _ = memcheck::mark_memory(
         data.as_ptr().cast::<c_void>(),

@@ -197,9 +197,8 @@ jobs:
 
   large-data:
     name: Large Data Tests
-    # Gigabyte-scale streaming hashes against independent references, catching
-    # a block-boundary or offset bug that only shows at scale. Release build:
-    # the 1 GiB sweep is seconds optimized, minutes unoptimized.
+    # Gigabyte-scale streaming hashes vs independent references. Release: the
+    # 1 GiB sweep is seconds optimized, minutes unoptimized.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -213,10 +212,8 @@ jobs:
 
   miri:
     name: Miri (portable)
-    # Miri interprets the portable scalar backend (the vector backends are
-    # cfg'd out), catching UB the sanitizers and tests miss: aliasing
-    # violations, uninitialized reads, out-of-bounds in the sponge's manual
-    # byte-to-lane packing.
+    # Interprets the portable backend for UB the sanitizers miss: aliasing,
+    # uninitialized reads, out-of-bounds in the sponge's byte packing.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -230,9 +227,8 @@ jobs:
 
   big-endian:
     name: big-endian (s390x)
-    # The sponge packs bytes to and from 64-bit lanes by hand; every CI target
-    # is little-endian, so this qemu-emulated s390x run is the only proof the
-    # from_le_bytes/to_le_bytes conversions are actually endian-correct.
+    # Only proof the sponge's manual byte packing is endian-correct; every
+    # other CI target is little-endian.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
