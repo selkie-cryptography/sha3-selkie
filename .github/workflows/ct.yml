@@ -31,13 +31,14 @@ jobs:
       RUSTFLAGS: ${{ matrix.flags }}
     strategy:
       fail-fast: false
-      # One leg per Valgrind-runnable backend. Apple NEON has no Valgrind host;
-      # Valgrind cannot decode AVX-512 (the SDE test leg covers it).
+      # Backends whose instructions Valgrind can decode: portable scalar and
+      # four-way AVX2 on x86. Valgrind cannot decode the FEAT_SHA3 vector ops
+      # (eor3/rax1/xar/bcax) the hybrid kernel uses, nor AVX-512; both are
+      # branchless by construction and the SDE test leg covers AVX-512.
       matrix:
         include:
           - { backend: portable, os: ubuntu-latest, flags: "" }
           - { backend: avx2, os: ubuntu-latest, flags: "-C target-feature=+avx2" }
-          - { backend: hybrid, os: ubuntu-24.04-arm, flags: "-C target-feature=+sha3" }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
