@@ -21,9 +21,21 @@ proptest = "1"
 # The independent SHA-3 implementation this crate cross-checks against.
 libcrux-sha3 = { version = "=0.0.10", default-features = false }
 divan = "0.1"
+# Empirical constant-time timing analysis (the `tacet` bench).
+tacet = "0.4"
+rand_core = { version = "0.6", features = ["getrandom"] }
+
+# Linux-only: crabgrind needs <valgrind/valgrind.h>. Drives the ctgrind test's
+# secret-taint client requests and the callgrind-equality trace check.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+crabgrind = "0.2"
 
 [[bench]]
 name = "hash_functions"
+harness = false
+
+[[bench]]
+name = "tacet"
 harness = false
 
 [lints.rust]

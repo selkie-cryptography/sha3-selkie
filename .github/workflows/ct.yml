@@ -1,0 +1,82 @@
+name: Constant-time
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "src/**"
+      - "tests/ctgrind.rs"
+      - "benches/tacet.rs"
+      - "Cargo.toml"
+      - ".github/workflows/ct.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Deterministic: marks the hashed message secret and runs each hasher under
+  # Valgrind memcheck, which errors on any branch or memory address that
+  # depends on the tainted bytes. Keccak is data-oblivious, so a clean run is
+  # the invariant; a regression (a table lookup or branch sneaking into a
+  # backend) fails the build.
+  ctgrind:
+    name: ctgrind (${{ matrix.backend }})
+    runs-on: ${{ matrix.os }}
+    env:
+      RUSTFLAGS: ${{ matrix.flags }}
+    strategy:
+      fail-fast: false
+      # One leg per backend that compiles on a Valgrind-supported target:
+      # portable scalar and four-way AVX2 on x86, hybrid scalar/NEON on
+      # arm64. Apple NEON has no Valgrind host, and AVX-512 Valgrind cannot
+      # decode (the SDE test leg covers it).
+      matrix:
+        include:
+          - { backend: portable, os: ubuntu-latest, flags: "" }
+          - { backend: avx2, os: ubuntu-latest, flags: "-C target-feature=+avx2" }
+          - { backend: hybrid, os: ubuntu-24.04-arm, flags: "-C target-feature=+sha3" }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install Valgrind
+        run: sudo apt-get update && sudo apt-get install --yes valgrind
+      - name: Build ctgrind test
+        run: cargo test --test ctgrind --no-run
+      - name: Run under memcheck
+        run: |
+          set -o pipefail
+          bin=$(cargo test --test ctgrind --no-run --message-format=json \
+            | jq -r 'select(.profile.test == true) | .executable' | head -1)
+          valgrind --tool=memcheck --error-exitcode=1 --track-origins=yes \
+            "$bin" --test-threads=1
+
+  # Empirical: tacet times two message classes (all-zero vs random) under
+  # several attacker models. Noisier than memcheck; the backstop that catches
+  # a data-dependent timing the taint check somehow misses. Exits nonzero on
+  # any Fail.
+  tacet:
+    name: tacet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - run: cargo bench --bench tacet
