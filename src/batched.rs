@@ -72,58 +72,32 @@ where
 
     /// Absorbs one equal-length input per lane, permuting after each full
     /// rate block. The caller guarantees equal lengths.
-    #[allow(
-        clippy::indexing_slicing,
-        clippy::needless_range_loop,
-        reason = "lockstep absorb indexes the parallel lanes by byte position"
-    )]
+    ///
+    /// Walks a rate block at a time rather than a word at a time: the cursor
+    /// arithmetic and the per-lane dispatch then amortize over the whole block
+    /// instead of over every eight bytes.
     fn absorb(&mut self, inputs: &[&[u8]; LANES]) {
         let len = inputs.first().map_or(0, |input| input.len());
         let mut j = 0;
 
-        while self.offset % 8 != 0 && j < len {
-            self.absorb_byte_batched(inputs, j);
-            j += 1;
-        }
+        while j < len {
+            let run = (RATE - self.offset).min(len - j);
 
-        while j + 8 <= len {
-            for lane in 0..LANES {
-                #[allow(
-                    clippy::unwrap_used,
-                    reason = "`j + 8 <= len` makes the slice exactly 8 bytes"
-                )]
-                let word = u64::from_le_bytes(inputs[lane][j..j + 8].try_into().unwrap());
-                self.states[lane][self.offset / 8] ^= word;
+            #[allow(
+                clippy::indexing_slicing,
+                reason = "`run` is bounded by the shared input length, so `j + run <= len`"
+            )]
+            for (state, input) in self.states.iter_mut().zip(inputs.iter()) {
+                xor_block(state, self.offset, &input[j..j + run]);
             }
-            self.offset += 8;
-            j += 8;
+
+            self.offset += run;
+            j += run;
 
             if self.offset == RATE {
                 self.states.permute();
                 self.offset = 0;
             }
-        }
-
-        while j < len {
-            self.absorb_byte_batched(inputs, j);
-            j += 1;
-        }
-    }
-
-    /// Absorbs byte `j` of every lane at the shared cursor.
-    #[allow(
-        clippy::indexing_slicing,
-        reason = "the caller bounds `j` by the shared input length"
-    )]
-    fn absorb_byte_batched(&mut self, inputs: &[&[u8]; LANES], j: usize) {
-        for (lane, input) in inputs.iter().enumerate() {
-            self.xor_byte(lane, self.offset, input[j]);
-        }
-        self.offset += 1;
-
-        if self.offset == RATE {
-            self.states.permute();
-            self.offset = 0;
         }
     }
 
@@ -139,13 +113,12 @@ where
         self.offset = 0;
     }
 
-    /// Squeezes into each `out[lane]`, permuting between rate blocks.
-    #[allow(
-        clippy::indexing_slicing,
-        clippy::needless_range_loop,
-        reason = "lockstep squeeze indexes the parallel lanes by byte position"
-    )]
-    fn squeeze(&mut self, out: [&mut [u8]; LANES]) {
+    /// Squeezes into each `out[lane]`, permuting between rate blocks. The
+    /// caller guarantees equal per-lane lengths (the lockstep condition;
+    /// ragged reads degrade to scalar lanes before reaching here).
+    ///
+    /// Block-at-a-time, as [`Self::absorb`].
+    fn squeeze(&mut self, mut out: [&mut [u8]; LANES]) {
         let len = out.first().map_or(0, |slot| slot.len());
         let mut j = 0;
 
@@ -155,22 +128,18 @@ where
                 self.offset = 0;
             }
 
-            if self.offset % 8 == 0 && j + 8 <= len {
-                for lane in 0..LANES {
-                    let word = self.states[lane][self.offset / 8];
-                    out[lane][j..j + 8].copy_from_slice(&word.to_le_bytes());
-                }
-                self.offset += 8;
-                j += 8;
-                continue;
+            let run = (RATE - self.offset).min(len - j);
+
+            #[allow(
+                clippy::indexing_slicing,
+                reason = "`run` is bounded by the shared output length, so `j + run <= len`"
+            )]
+            for (state, slot) in self.states.iter().zip(out.iter_mut()) {
+                read_block(state, self.offset, &mut slot[j..j + run]);
             }
 
-            for lane in 0..LANES {
-                let word = self.states[lane][self.offset / 8];
-                out[lane][j] = (word >> (8 * (self.offset % 8))) as u8;
-            }
-            self.offset += 1;
-            j += 1;
+            self.offset += run;
+            j += run;
         }
     }
 
@@ -545,5 +514,71 @@ impl Shake256X2Reader {
     /// as [`Shake256X4Reader::squeeze`].
     pub fn squeeze(&mut self, out: [&mut [u8]; 2]) {
         self.inner.squeeze(out);
+    }
+}
+
+/// XORs `data` into `state`'s rate block starting at byte `pos`, little-endian
+/// within each lane.
+///
+/// Splits into a ragged head that finishes the partially-filled word, a run of
+/// whole words, and a ragged tail, so a block-length call touches each state
+/// word once.
+#[allow(
+    clippy::indexing_slicing,
+    reason = "callers bound `pos + data.len()` by `RATE <= 200`, so `pos / 8 < 25`"
+)]
+fn xor_block(state: &mut [u64; 25], pos: usize, data: &[u8]) {
+    let mut data = data;
+    let mut pos = pos;
+
+    while pos % 8 != 0 {
+        let Some((&byte, rest)) = data.split_first() else {
+            return;
+        };
+        state[pos / 8] ^= u64::from(byte) << (8 * (pos % 8));
+        pos += 1;
+        data = rest;
+    }
+
+    let (words, tail) = data.split_at(data.len() - data.len() % 8);
+    for (index, word) in words.chunks_exact(8).enumerate() {
+        let mut buffer = [0u8; 8];
+        buffer.copy_from_slice(word);
+        state[pos / 8 + index] ^= u64::from_le_bytes(buffer);
+    }
+    pos += words.len();
+
+    for (index, &byte) in tail.iter().enumerate() {
+        state[pos / 8] ^= u64::from(byte) << (8 * index);
+    }
+}
+
+/// Fills `out` from `state`'s rate block starting at byte `pos`, the inverse of
+/// [`xor_block`] and split the same three ways.
+#[allow(
+    clippy::indexing_slicing,
+    reason = "callers bound `pos + out.len()` by `RATE <= 200`, so `pos / 8 < 25`"
+)]
+fn read_block(state: &[u64; 25], pos: usize, out: &mut [u8]) {
+    let mut out = out;
+    let mut pos = pos;
+
+    while pos % 8 != 0 {
+        let Some((slot, rest)) = out.split_first_mut() else {
+            return;
+        };
+        *slot = (state[pos / 8] >> (8 * (pos % 8))) as u8;
+        pos += 1;
+        out = rest;
+    }
+
+    let (words, tail) = out.split_at_mut(out.len() - out.len() % 8);
+    for (index, word) in words.chunks_exact_mut(8).enumerate() {
+        word.copy_from_slice(&state[pos / 8 + index].to_le_bytes());
+    }
+    pos += words.len();
+
+    for (index, slot) in tail.iter_mut().enumerate() {
+        *slot = (state[pos / 8] >> (8 * index)) as u8;
     }
 }
