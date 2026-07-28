@@ -38,46 +38,24 @@ impl<const RATE: usize> Sponge<RATE> {
 
     /// Absorbs `data`, permuting after each full rate block.
     ///
-    /// Whole 8-byte lanes are XORed at once wherever the cursor is
-    /// lane-aligned (`RATE` is always a multiple of 8, so an aligned lane
-    /// never straddles the rate boundary); ragged head and tail bytes go
-    /// through the byte path.
+    /// Walks a rate block at a time: the cursor arithmetic and the boundary
+    /// check then amortize over the whole block rather than over every eight
+    /// bytes.
     pub(crate) fn absorb(&mut self, data: &[u8]) {
         let mut data = data;
 
-        while self.offset % 8 != 0 {
-            let Some((&byte, rest)) = data.split_first() else {
-                return;
-            };
-            self.absorb_byte(byte);
-            data = rest;
-        }
+        while !data.is_empty() {
+            let run = (RATE - self.offset).min(data.len());
+            let (block, rest) = data.split_at(run);
 
-        while let Some((lane_bytes, rest)) = data.split_first_chunk::<8>() {
-            self.state
-                .xor_lane(self.offset / 8, u64::from_le_bytes(*lane_bytes));
-            self.offset += 8;
+            self.state.xor_block(self.offset, block);
+            self.offset += run;
             data = rest;
 
             if self.offset == RATE {
                 self.state.permute();
                 self.offset = 0;
             }
-        }
-
-        for &byte in data {
-            self.absorb_byte(byte);
-        }
-    }
-
-    /// Absorbs one byte at the cursor, permuting on a full rate block.
-    fn absorb_byte(&mut self, byte: u8) {
-        self.xor_byte(self.offset, byte);
-        self.offset += 1;
-
-        if self.offset == RATE {
-            self.state.permute();
-            self.offset = 0;
         }
     }
 
@@ -94,8 +72,8 @@ impl<const RATE: usize> Sponge<RATE> {
     /// Squeezes `out.len()` bytes, permuting between rate blocks.
     ///
     /// Call only after [`finalize`][Sponge::finalize]; may be called repeatedly
-    /// to extend the output (the XOF contract). Whole lanes are copied at once
-    /// wherever the cursor is lane-aligned, as in [`absorb`][Sponge::absorb].
+    /// to extend the output (the XOF contract). Block-at-a-time, as
+    /// [`absorb`][Sponge::absorb].
     pub(crate) fn squeeze(&mut self, out: &mut [u8]) {
         let mut out = out;
 
@@ -105,21 +83,12 @@ impl<const RATE: usize> Sponge<RATE> {
                 self.offset = 0;
             }
 
-            let taken = core::mem::take(&mut out);
-            if self.offset % 8 == 0 && taken.len() >= 8 {
-                let (slot, rest) = taken.split_at_mut(8);
-                slot.copy_from_slice(&self.state.lane(self.offset / 8).to_le_bytes());
-                self.offset += 8;
-                out = rest;
-            } else {
-                let lane = self.state.lane(self.offset / 8);
-                let Some((slot, rest)) = taken.split_first_mut() else {
-                    return;
-                };
-                *slot = (lane >> (8 * (self.offset % 8))) as u8;
-                self.offset += 1;
-                out = rest;
-            }
+            let run = (RATE - self.offset).min(out.len());
+            let (block, rest) = core::mem::take(&mut out).split_at_mut(run);
+
+            self.state.read_block(self.offset, block);
+            self.offset += run;
+            out = rest;
         }
     }
 

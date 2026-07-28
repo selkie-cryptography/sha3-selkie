@@ -63,17 +63,20 @@ impl State {
         }
     }
 
-    /// Returns lane `index`.
-    pub(crate) fn lane(&self, index: usize) -> u64 {
-        #[allow(clippy::indexing_slicing, reason = "as `xor_lane`")]
-        {
-            self.lanes[index]
-        }
-    }
-
     /// Applies the 24-round `Keccak-f[1600]` permutation in place.
     pub(crate) fn permute(&mut self) {
         permute(&mut self.lanes);
+    }
+
+    /// XORs `data` into the state starting at byte `pos`, little-endian within
+    /// each lane.
+    pub(crate) fn xor_block(&mut self, pos: usize, data: &[u8]) {
+        xor_block(&mut self.lanes, pos, data);
+    }
+
+    /// Fills `out` from the state starting at byte `pos`.
+    pub(crate) fn read_block(&self, pos: usize, out: &mut [u8]) {
+        read_block(&self.lanes, pos, out);
     }
 }
 
@@ -168,5 +171,71 @@ impl Batch for [[u64; 25]; 4] {
         for state in self {
             permute(state);
         }
+    }
+}
+
+/// XORs `data` into `lanes`'s rate block starting at byte `pos`, little-endian
+/// within each lane.
+///
+/// Splits into a ragged head that finishes the partially-filled word, a run of
+/// whole words, and a ragged tail, so a block-length call touches each state
+/// word once.
+#[allow(
+    clippy::indexing_slicing,
+    reason = "callers bound `pos + data.len()` by `RATE <= 200`, so `pos / 8 < 25`"
+)]
+pub(crate) fn xor_block(lanes: &mut [u64; 25], pos: usize, data: &[u8]) {
+    let mut data = data;
+    let mut pos = pos;
+
+    while pos % 8 != 0 {
+        let Some((&byte, rest)) = data.split_first() else {
+            return;
+        };
+        lanes[pos / 8] ^= u64::from(byte) << (8 * (pos % 8));
+        pos += 1;
+        data = rest;
+    }
+
+    let (words, tail) = data.split_at(data.len() - data.len() % 8);
+    for (index, word) in words.chunks_exact(8).enumerate() {
+        let mut buffer = [0u8; 8];
+        buffer.copy_from_slice(word);
+        lanes[pos / 8 + index] ^= u64::from_le_bytes(buffer);
+    }
+    pos += words.len();
+
+    for (index, &byte) in tail.iter().enumerate() {
+        lanes[pos / 8] ^= u64::from(byte) << (8 * index);
+    }
+}
+
+/// Fills `out` from `lanes`'s rate block starting at byte `pos`, the inverse of
+/// [`xor_block`] and split the same three ways.
+#[allow(
+    clippy::indexing_slicing,
+    reason = "callers bound `pos + out.len()` by `RATE <= 200`, so `pos / 8 < 25`"
+)]
+pub(crate) fn read_block(lanes: &[u64; 25], pos: usize, out: &mut [u8]) {
+    let mut out = out;
+    let mut pos = pos;
+
+    while pos % 8 != 0 {
+        let Some((slot, rest)) = out.split_first_mut() else {
+            return;
+        };
+        *slot = (lanes[pos / 8] >> (8 * (pos % 8))) as u8;
+        pos += 1;
+        out = rest;
+    }
+
+    let (words, tail) = out.split_at_mut(out.len() - out.len() % 8);
+    for (index, word) in words.chunks_exact_mut(8).enumerate() {
+        word.copy_from_slice(&lanes[pos / 8 + index].to_le_bytes());
+    }
+    pos += words.len();
+
+    for (index, slot) in tail.iter_mut().enumerate() {
+        *slot = (lanes[pos / 8] >> (8 * index)) as u8;
     }
 }

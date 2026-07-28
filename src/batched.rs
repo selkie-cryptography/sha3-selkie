@@ -24,7 +24,7 @@
 //! [FIPS 203 Section 4.1]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#section.4.1
 
 use crate::{
-    backend::{Batch, State},
+    backend::{self, Batch, State},
     shake::SHAKE_DOMAIN,
     sponge::Sponge,
 };
@@ -88,7 +88,7 @@ where
                 reason = "`run` is bounded by the shared input length, so `j + run <= len`"
             )]
             for (state, input) in self.states.iter_mut().zip(inputs.iter()) {
-                xor_block(state, self.offset, &input[j..j + run]);
+                backend::xor_block(state, self.offset, &input[j..j + run]);
             }
 
             self.offset += run;
@@ -135,7 +135,7 @@ where
                 reason = "`run` is bounded by the shared output length, so `j + run <= len`"
             )]
             for (state, slot) in self.states.iter().zip(out.iter_mut()) {
-                read_block(state, self.offset, &mut slot[j..j + run]);
+                backend::read_block(state, self.offset, &mut slot[j..j + run]);
             }
 
             self.offset += run;
@@ -514,71 +514,5 @@ impl Shake256X2Reader {
     /// as [`Shake256X4Reader::squeeze`].
     pub fn squeeze(&mut self, out: [&mut [u8]; 2]) {
         self.inner.squeeze(out);
-    }
-}
-
-/// XORs `data` into `state`'s rate block starting at byte `pos`, little-endian
-/// within each lane.
-///
-/// Splits into a ragged head that finishes the partially-filled word, a run of
-/// whole words, and a ragged tail, so a block-length call touches each state
-/// word once.
-#[allow(
-    clippy::indexing_slicing,
-    reason = "callers bound `pos + data.len()` by `RATE <= 200`, so `pos / 8 < 25`"
-)]
-fn xor_block(state: &mut [u64; 25], pos: usize, data: &[u8]) {
-    let mut data = data;
-    let mut pos = pos;
-
-    while pos % 8 != 0 {
-        let Some((&byte, rest)) = data.split_first() else {
-            return;
-        };
-        state[pos / 8] ^= u64::from(byte) << (8 * (pos % 8));
-        pos += 1;
-        data = rest;
-    }
-
-    let (words, tail) = data.split_at(data.len() - data.len() % 8);
-    for (index, word) in words.chunks_exact(8).enumerate() {
-        let mut buffer = [0u8; 8];
-        buffer.copy_from_slice(word);
-        state[pos / 8 + index] ^= u64::from_le_bytes(buffer);
-    }
-    pos += words.len();
-
-    for (index, &byte) in tail.iter().enumerate() {
-        state[pos / 8] ^= u64::from(byte) << (8 * index);
-    }
-}
-
-/// Fills `out` from `state`'s rate block starting at byte `pos`, the inverse of
-/// [`xor_block`] and split the same three ways.
-#[allow(
-    clippy::indexing_slicing,
-    reason = "callers bound `pos + out.len()` by `RATE <= 200`, so `pos / 8 < 25`"
-)]
-fn read_block(state: &[u64; 25], pos: usize, out: &mut [u8]) {
-    let mut out = out;
-    let mut pos = pos;
-
-    while pos % 8 != 0 {
-        let Some((slot, rest)) = out.split_first_mut() else {
-            return;
-        };
-        *slot = (state[pos / 8] >> (8 * (pos % 8))) as u8;
-        pos += 1;
-        out = rest;
-    }
-
-    let (words, tail) = out.split_at_mut(out.len() - out.len() % 8);
-    for (index, word) in words.chunks_exact_mut(8).enumerate() {
-        word.copy_from_slice(&state[pos / 8 + index].to_le_bytes());
-    }
-    pos += words.len();
-
-    for (index, slot) in tail.iter_mut().enumerate() {
-        *slot = (state[pos / 8] >> (8 * index)) as u8;
     }
 }
