@@ -13,9 +13,20 @@ repository = "https://github.com/selkie-cryptography/sha3-selkie"
 # tooling), not part of the published package.
 exclude = ["fuzz", "ct"]
 
+[features]
+# Publishes the bare `Keccak-f[1600]` permutations as `#[doc(hidden)]` items,
+# for `benches/permutation.rs` and cross-implementation comparison. Not part
+# of the semver contract.
+expose-internals = []
+
 [dependencies]
 
 [dev-dependencies]
+# Self dev-dep so `expose-internals` is active for benches without leaking
+# into the default public build. Path-only, no `version`: cargo strips it from
+# the published manifest (a versioned self dev-dep can't resolve during a
+# first-of-its-version publish).
+sha3-selkie = { path = ".", features = ["expose-internals"] }
 hex = "0.4"
 proptest = "1"
 # The independent SHA-3 implementation this crate cross-checks against.
@@ -24,6 +35,10 @@ divan = "0.1"
 
 [[bench]]
 name = "hash_functions"
+harness = false
+
+[[bench]]
+name = "permutation"
 harness = false
 
 [lints.rust]

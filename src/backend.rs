@@ -71,15 +71,9 @@ impl State {
         }
     }
 
-    /// Applies the 24-round `Keccak-f[1600]` permutation in place: the
-    /// dead-lane vector kernel on Apple cores, scalar elsewhere (constrained
-    /// SHA-3 pipes lose to the scalar ALUs on a single stream).
+    /// Applies the 24-round `Keccak-f[1600]` permutation in place.
     pub(crate) fn permute(&mut self) {
-        #[cfg(all(sha3_selkie_ext, not(sha3_selkie_hybrid)))]
-        neon::permute(&mut self.lanes);
-
-        #[cfg(not(all(sha3_selkie_ext, not(sha3_selkie_hybrid))))]
-        scalar::permute(&mut self.lanes);
+        permute(&mut self.lanes);
     }
 }
 
@@ -87,6 +81,19 @@ impl From<[u64; 25]> for State {
     fn from(lanes: [u64; 25]) -> Self {
         Self { lanes }
     }
+}
+
+/// Permutes one state, for the single-stream sponge.
+///
+/// Dispatches at compile time: the dead-lane vector kernel on Apple cores,
+/// scalar elsewhere (constrained SHA-3 pipes lose to the scalar ALUs on a
+/// single stream).
+pub(crate) fn permute(lanes: &mut [u64; 25]) {
+    #[cfg(all(sha3_selkie_ext, not(sha3_selkie_hybrid)))]
+    neon::permute(lanes);
+
+    #[cfg(not(all(sha3_selkie_ext, not(sha3_selkie_hybrid))))]
+    scalar::permute(lanes);
 }
 
 /// Permutes four independent states at once, for the batched sponge.
