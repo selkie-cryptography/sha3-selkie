@@ -16,7 +16,7 @@
 //! actually buys.
 
 use divan::{Bencher, black_box, counter::ItemsCount};
-use sha3_selkie::{keccak_f1600, keccak_f1600_x2, keccak_f1600_x4};
+use sha3_selkie::{keccak_f1600, keccak_f1600_x2, keccak_f1600_x4, keccak_f1600_x8};
 
 fn main() {
     divan::main();
@@ -62,4 +62,16 @@ fn f1600_two_streams_via_x4(bencher: Bencher<'_, '_>) {
     bencher
         .counter(ItemsCount::new(2usize))
         .bench_local(|| keccak_f1600_x4(black_box(&mut states)));
+}
+
+/// One batched permutation of eight independent states, counted per stream.
+///
+/// A single 512-bit AVX-512 permutation; two four-way ones everywhere else.
+#[divan::bench]
+fn f1600_x8(bencher: Bencher<'_, '_>) {
+    let mut states = [[0u64; 25]; 8];
+
+    bencher
+        .counter(ItemsCount::new(8usize))
+        .bench_local(|| keccak_f1600_x8(black_box(&mut states)));
 }

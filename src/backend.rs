@@ -86,6 +86,25 @@ impl From<[u64; 25]> for State {
     }
 }
 
+impl Batch for [[u64; 25]; 8] {
+    /// The eight-way AVX-512 permutation, which fills a 512-bit register with
+    /// eight states; every other backend splits into two four-way halves and
+    /// dispatches each through [`Batch`] again.
+    fn permute(&mut self) {
+        #[cfg(sha3_selkie_avx512)]
+        avx512::permute_x8(self);
+
+        #[cfg(not(sha3_selkie_avx512))]
+        if let Some((first, rest)) = self.split_first_chunk_mut::<4>() {
+            first.permute();
+
+            if let Some((second, _)) = rest.split_first_chunk_mut::<4>() {
+                second.permute();
+            }
+        }
+    }
+}
+
 /// Permutes one state, for the single-stream sponge.
 ///
 /// Dispatches at compile time: the dead-lane vector kernel on Apple cores,

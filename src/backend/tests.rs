@@ -96,6 +96,67 @@ fn permute_x2_matches_scalar() {
     }
 }
 
+/// The eight-way batched permutation reproduces the scalar reference on each
+/// of its eight states.
+///
+/// On AVX-512 this is the only check on the 8x8 transpose that packs the
+/// states into 512-bit lanes and unpacks them again: a mis-wired stage would
+/// permute whole states against each other, which every state-independent
+/// property would otherwise miss. Elsewhere it covers the split into two
+/// four-way halves.
+#[test]
+fn permute_x8_matches_scalar() {
+    let mut seed: u64 = 0x0F1E_2D3C_4B5A_6978;
+    let mut next = || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        seed
+    };
+
+    for _ in 0..64 {
+        let mut states = [[0u64; 25]; 8];
+        for state in &mut states {
+            for lane in state.iter_mut() {
+                *lane = next();
+            }
+        }
+
+        let mut expected = states;
+        states.permute();
+        for state in &mut expected {
+            scalar::permute(state);
+        }
+
+        assert_eq!(states, expected);
+    }
+}
+
+/// Eight *distinct* states stay distinct and land in their own slots.
+///
+/// `permute_x8_matches_scalar` would still pass if the packing transposed the
+/// states consistently but assigned them to the wrong output rows, since every
+/// state is compared against its own scalar reference only after the fact.
+/// Seeding each state with a distinguishable constant catches a permuted
+/// assignment directly.
+#[test]
+fn permute_x8_keeps_states_in_their_lanes() {
+    let mut states = [[0u64; 25]; 8];
+    for (index, state) in states.iter_mut().enumerate() {
+        state[0] = index as u64 + 1;
+    }
+
+    let mut expected = states;
+    states.permute();
+    for state in &mut expected {
+        scalar::permute(state);
+    }
+
+    for (index, (got, want)) in states.iter().zip(&expected).enumerate() {
+        assert_eq!(got, want, "state {index} landed in the wrong lane");
+    }
+}
+
 /// The single-stream vector backend (the dead-lane two-way kernel) matches
 /// the scalar reference on every state.
 #[cfg(sha3_selkie_ext)]
