@@ -6,6 +6,9 @@
 //! and outside the semver contract — the arch dispatch behind them is free to
 //! change.
 
+#[cfg(test)]
+mod tests;
+
 use crate::backend::{self, Batch};
 
 /// Applies the 24-round permutation to one state, lane `(x, y)` at index
