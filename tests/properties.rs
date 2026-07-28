@@ -98,6 +98,26 @@ proptest! {
             prop_assert_eq!(lane, &expected);
         }
     }
+
+    /// Each batched `Shake128X2` lane matches the scalar hasher on that lane's
+    /// seed, over the same arbitrary seed lengths and output lengths as the
+    /// four-lane case.
+    #[test]
+    fn shake128_x2_matches_scalar(
+        seeds in prop::array::uniform2(prop::collection::vec(any::<u8>(), 0..64)),
+        out_len in 0usize..300,
+    ) {
+        let [s0, s1] = &seeds;
+        let mut batched = sha3_selkie::Shake128X2::absorb([s0, s1]);
+        let mut lanes = [vec![0u8; out_len], vec![0u8; out_len]];
+        let [l0, l1] = &mut lanes;
+        batched.squeeze([l0, l1]);
+
+        for (lane, seed) in lanes.iter().zip(&seeds) {
+            let expected = selkie_shake128(seed, out_len);
+            prop_assert_eq!(lane, &expected);
+        }
+    }
 }
 
 /// A deterministic pseudo-random buffer of `len` bytes, so the large-input

@@ -6,7 +6,9 @@
 //! cost and the fixed setup cost are both visible.
 
 use divan::{Bencher, black_box};
-use sha3_selkie::{Sha3_256, Sha3_512, Shake128, Shake128X4, Shake256, Shake256X4};
+use sha3_selkie::{
+    Sha3_256, Sha3_512, Shake128, Shake128X2, Shake128X4, Shake256, Shake256X2, Shake256X4,
+};
 
 fn main() {
     divan::main();
@@ -58,15 +60,11 @@ fn shake128(bencher: Bencher<'_, '_>, size: usize) {
 fn shake256_squeeze(bencher: Bencher<'_, '_>, size: usize) {
     let input = message(32);
 
-    bencher.bench(|| {
+    bencher.with_inputs(|| vec![0u8; size]).bench_refs(|out| {
         let mut hasher = Shake256::new();
         hasher.update(black_box(&input));
 
-        let mut reader = hasher.finalize_xof();
-        let mut out = vec![0u8; size];
-        reader.read(&mut out);
-
-        out
+        hasher.finalize_xof().read(out);
     });
 }
 
@@ -76,25 +74,26 @@ fn shake256_squeeze(bencher: Bencher<'_, '_>, size: usize) {
 fn shake128_x4(bencher: Bencher<'_, '_>, size: usize) {
     let seeds = [message(32), message(32), message(32), message(32)];
 
-    bencher.bench(|| {
-        let mut hasher = Shake128X4::absorb([
-            black_box(seeds[0].as_slice()),
-            black_box(seeds[1].as_slice()),
-            black_box(seeds[2].as_slice()),
-            black_box(seeds[3].as_slice()),
-        ]);
+    bencher
+        .with_inputs(|| {
+            [
+                vec![0u8; size],
+                vec![0u8; size],
+                vec![0u8; size],
+                vec![0u8; size],
+            ]
+        })
+        .bench_refs(|out| {
+            let mut hasher = Shake128X4::absorb([
+                black_box(seeds[0].as_slice()),
+                black_box(seeds[1].as_slice()),
+                black_box(seeds[2].as_slice()),
+                black_box(seeds[3].as_slice()),
+            ]);
 
-        let mut out = [
-            vec![0u8; size],
-            vec![0u8; size],
-            vec![0u8; size],
-            vec![0u8; size],
-        ];
-        let [o0, o1, o2, o3] = &mut out;
-        hasher.squeeze([o0, o1, o2, o3]);
-
-        out
-    });
+            let [o0, o1, o2, o3] = out;
+            hasher.squeeze([o0, o1, o2, o3]);
+        });
 }
 
 /// SHAKE256 x4 absorbing four 32-byte inputs and squeezing `size` bytes each,
@@ -103,23 +102,63 @@ fn shake128_x4(bencher: Bencher<'_, '_>, size: usize) {
 fn shake256_x4(bencher: Bencher<'_, '_>, size: usize) {
     let inputs = [message(32), message(32), message(32), message(32)];
 
-    bencher.bench(|| {
-        let mut hasher = Shake256X4::absorb([
-            black_box(inputs[0].as_slice()),
-            black_box(inputs[1].as_slice()),
-            black_box(inputs[2].as_slice()),
-            black_box(inputs[3].as_slice()),
-        ]);
+    bencher
+        .with_inputs(|| {
+            [
+                vec![0u8; size],
+                vec![0u8; size],
+                vec![0u8; size],
+                vec![0u8; size],
+            ]
+        })
+        .bench_refs(|out| {
+            let mut hasher = Shake256X4::absorb([
+                black_box(inputs[0].as_slice()),
+                black_box(inputs[1].as_slice()),
+                black_box(inputs[2].as_slice()),
+                black_box(inputs[3].as_slice()),
+            ]);
 
-        let mut out = [
-            vec![0u8; size],
-            vec![0u8; size],
-            vec![0u8; size],
-            vec![0u8; size],
-        ];
-        let [o0, o1, o2, o3] = &mut out;
-        hasher.squeeze([o0, o1, o2, o3]);
+            let [o0, o1, o2, o3] = out;
+            hasher.squeeze([o0, o1, o2, o3]);
+        });
+}
 
-        out
-    });
+/// SHAKE128 x2 absorbing two 32-byte seeds and squeezing `size` bytes each.
+/// Against [`shake128_x4`] at the same `size`, the per-stream difference is
+/// what a two-stream caller saves by not running two dead lanes.
+#[divan::bench(args = SIZES)]
+fn shake128_x2(bencher: Bencher<'_, '_>, size: usize) {
+    let seeds = [message(32), message(32)];
+
+    bencher
+        .with_inputs(|| [vec![0u8; size], vec![0u8; size]])
+        .bench_refs(|out| {
+            let mut hasher = Shake128X2::absorb([
+                black_box(seeds[0].as_slice()),
+                black_box(seeds[1].as_slice()),
+            ]);
+
+            let [o0, o1] = out;
+            hasher.squeeze([o0, o1]);
+        });
+}
+
+/// SHAKE256 x2 absorbing two 32-byte inputs and squeezing `size` bytes each,
+/// the two-lane PRF pattern (ML-KEM-512's `k = 2` noise vector).
+#[divan::bench(args = SIZES)]
+fn shake256_x2(bencher: Bencher<'_, '_>, size: usize) {
+    let inputs = [message(32), message(32)];
+
+    bencher
+        .with_inputs(|| [vec![0u8; size], vec![0u8; size]])
+        .bench_refs(|out| {
+            let mut hasher = Shake256X2::absorb([
+                black_box(inputs[0].as_slice()),
+                black_box(inputs[1].as_slice()),
+            ]);
+
+            let [o0, o1] = out;
+            hasher.squeeze([o0, o1]);
+        });
 }

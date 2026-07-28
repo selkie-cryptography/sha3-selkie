@@ -6,7 +6,9 @@ The SHA-3 family over `Keccak-f[1600]`: the fixed-output hashes `Sha3_256`
 and `Sha3_512`, and the extendable-output functions `Shake128` and
 `Shake256`. Each is an incremental hasher (`new` / `update` / `finalize`)
 with a one-shot associated constructor (`digest`). The batched `Shake128X4`
-and `Shake256X4` squeeze four independent streams at once.
+and `Shake256X4` squeeze four independent streams at once, and `Shake128X2` /
+`Shake256X2` two — for stream counts that would otherwise leave half a
+four-way permutation computing lanes nobody reads.
 
 ```rust
 use sha3_selkie::{Sha3_256, Shake128};
@@ -27,12 +29,13 @@ The Keccak permutation is dispatched at compile time (the `sha3_selkie_ext`,
 
 - **scalar** — portable, the reference and fallback. Drives the single-stream
   hashers wherever no faster single-stream path exists.
-- **neon (two-way)** — on aarch64 with the Arm `sha3` extension, the batched
-  `Shake128X4` / `Shake256X4` run two independent states per vector through
-  `EOR3` / `RAX1` / `XAR` / `BCAX`. On Apple cores (SHA-3 ops on every SIMD
-  unit) the single-stream hashers also run this kernel with a dead second
-  lane — measurably faster than scalar. Unequal-length inputs fall back to
-  scalar.
+- **neon (two-way)** — on aarch64 with the Arm `sha3` extension, two
+  independent states per vector through `EOR3` / `RAX1` / `XAR` / `BCAX`. It
+  is the whole permutation for `Shake128X2` / `Shake256X2` on every such
+  target, and is run twice for `Shake128X4` / `Shake256X4` on Apple cores. On
+  Apple cores (SHA-3 ops on every SIMD unit) the single-stream hashers also
+  run this kernel with a dead second lane — measurably faster than scalar.
+  Unequal-length inputs fall back to scalar.
 - **hybrid (four-way, scalar/NEON)** — on non-Apple aarch64 with the `sha3`
   extension (Neoverse/Cortex before X4, Graviton class), where the SHA-3
   instructions issue on a subset of SIMD units: the batched paths run two
@@ -77,7 +80,8 @@ over secret values.
 
 Working scalar core with the full public API and NIST CAVP conformance,
 two-way NEON, four-way hybrid scalar/NEON, and four-way AVX2 batched paths
-for `Shake128X4` / `Shake256X4`, and hash-function benchmarks.
+for `Shake128X4` / `Shake256X4` and `Shake128X2` / `Shake256X2`, and
+hash-function and raw-permutation benchmarks.
 
 ## License
 

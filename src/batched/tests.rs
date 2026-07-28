@@ -241,3 +241,132 @@ fn shake256_x4_matches_scalar() {
         assert_eq!(*lane, Shake256::digest::<192>(input));
     }
 }
+
+/// Every `Shake128X2` lane squeezes the same bytes as a scalar `Shake128` on
+/// that lane's seed, across a multi-block read.
+#[test]
+fn shake128_x2_matches_scalar() {
+    let seeds: [[u8; 34]; 2] =
+        core::array::from_fn(|i| core::array::from_fn(|k| (i * 7 + k) as u8));
+
+    let [s0, s1] = &seeds;
+    let mut batched = Shake128X2::absorb([s0, s1]);
+    let mut lanes = [[0u8; 400]; 2];
+    let [l0, l1] = &mut lanes;
+    batched.squeeze([l0, l1]);
+
+    for (lane, seed) in lanes.iter().zip(&seeds) {
+        assert_eq!(*lane, Shake128::digest::<400>(seed));
+    }
+}
+
+/// The two-way path holds across multi-block absorb and squeeze, as
+/// `shake128_x4_multiblock_matches_scalar` does for four lanes.
+#[test]
+fn shake128_x2_multiblock_matches_scalar() {
+    let seeds: [[u8; 200]; 2] =
+        core::array::from_fn(|i| core::array::from_fn(|k| (i * 31 + k * 3) as u8));
+
+    let [s0, s1] = &seeds;
+    let mut batched = Shake128X2::absorb([s0, s1]);
+    let mut lanes = [[0u8; 500]; 2];
+    let [l0, l1] = &mut lanes;
+    batched.squeeze([l0, l1]);
+
+    for (lane, seed) in lanes.iter().zip(&seeds) {
+        assert_eq!(*lane, Shake128::digest::<500>(seed));
+    }
+}
+
+/// Chunked `update` calls at awkward alignments match the one-shot absorb on
+/// the two-way path: the shared cursor logic is generic over lane count, so
+/// this pins that the `LANES = 2` instantiation walks the same byte and word
+/// paths.
+#[test]
+#[allow(
+    clippy::indexing_slicing,
+    reason = "chunk bounds are compile-time constants within the seed length"
+)]
+fn shake128_x2_unaligned_updates_match_scalar() {
+    let seeds: [[u8; 200]; 2] =
+        core::array::from_fn(|i| core::array::from_fn(|k| (i * 11 + k * 7) as u8));
+
+    // As the four-lane case: 3 leaves the cursor unaligned, 13 enters
+    // unaligned and leaves unaligned, 1 and 6 are byte-path only, and 177
+    // crosses the 168-byte rate boundary inside the word loop.
+    let chunks = [3usize, 13, 1, 6, 177];
+
+    let mut batched = Shake128X2::new();
+    let mut start = 0;
+    for len in chunks {
+        let [s0, s1] = &seeds;
+        batched.update([&s0[start..start + len], &s1[start..start + len]]);
+        start += len;
+    }
+
+    let mut reader = batched.finalize_xof();
+    let mut lanes = [[0u8; 64]; 2];
+    let [l0, l1] = &mut lanes;
+    reader.squeeze([l0, l1]);
+
+    for (lane, seed) in lanes.iter().zip(&seeds) {
+        assert_eq!(*lane, Shake128::digest::<64>(seed));
+    }
+}
+
+/// Unequal-length seeds take the scalar fallback on two lanes too, and a
+/// ragged squeeze afterwards still resumes each lane's own stream.
+#[test]
+fn shake256_x2_unequal_lengths_match_scalar() {
+    let inputs: [&[u8]; 2] = [b"a", b"bbbb"];
+
+    let mut batched = Shake256X2::absorb(inputs);
+    assert!(matches!(batched.inner, Squeezing::Lanes(_)));
+
+    let mut lanes = [[0u8; 200]; 2];
+    let [l0, l1] = &mut lanes;
+    batched.squeeze([l0, l1]);
+
+    for (lane, input) in lanes.iter().zip(&inputs) {
+        assert_eq!(*lane, Shake256::digest::<200>(input));
+    }
+}
+
+/// Equal-length updates keep two lanes in lockstep; the first unequal one
+/// degrades them. The four-lane twin of this guards the same dispatch, which
+/// output equality alone cannot see.
+#[test]
+fn shake256_x2_equal_length_updates_stay_lockstep() {
+    let mut batched = Shake256X2::new();
+    batched.update([b"aaaa", b"bbbb"]);
+    batched.update([b"e", b"f"]);
+    assert!(matches!(batched.inner, Absorbing::Lockstep(_)));
+
+    batched.update([b"i", b"jj"]);
+    assert!(matches!(batched.inner, Absorbing::Lanes(_)));
+}
+
+/// Two lanes of `Shake256X2` agree with the first two lanes of `Shake256X4`
+/// fed the same inputs. The widths reach different kernels — the NEON pair
+/// versus two of them, or a padded AVX2 permutation versus a full one — so
+/// this is the direct cross-width check that the narrow path is not a
+/// separate implementation with its own bugs.
+#[test]
+fn shake256_x2_agrees_with_x4() {
+    let inputs: [[u8; 33]; 4] = core::array::from_fn(|i| [(i as u8 + 1) * 10; 33]);
+
+    let [i0, i1, i2, i3] = &inputs;
+    let mut wide = Shake256X4::absorb([i0, i1, i2, i3]);
+    let mut wide_lanes = [[0u8; 192]; 4];
+    let [w0, w1, w2, w3] = &mut wide_lanes;
+    wide.squeeze([w0, w1, w2, w3]);
+
+    let mut narrow = Shake256X2::absorb([i0, i1]);
+    let mut narrow_lanes = [[0u8; 192]; 2];
+    let [n0, n1] = &mut narrow_lanes;
+    narrow.squeeze([n0, n1]);
+
+    for (narrow_lane, wide_lane) in narrow_lanes.iter().zip(&wide_lanes) {
+        assert_eq!(narrow_lane, wide_lane);
+    }
+}

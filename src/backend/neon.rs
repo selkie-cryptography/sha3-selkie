@@ -9,9 +9,12 @@
 //! [`permute_pair`] takes the batched path: two independent Keccak states
 //! packed into the two lanes of every vector, where the same lane position
 //! shares a rho offset. `EOR3`, `RAX1`, `XAR`, and `BCAX` then each advance
-//! both states at once with no cross-lane shuffles — the two-way permutation
-//! behind the `Shake128X4` / `Shake256X4` matrix-expansion and PRF paths on
-//! Apple cores; non-Apple aarch64 batches via the `hybrid` module instead.
+//! both states at once with no cross-lane shuffles. It backs the four-way
+//! `Shake128X4` / `Shake256X4` matrix-expansion and PRF paths on Apple cores
+//! (run twice), and the two-way `Shake128X2` / `Shake256X2` paths on every
+//! aarch64 target with the extension — including non-Apple cores, whose
+//! four-way batching goes through the `hybrid` module but which have no
+//! two-way analogue of that scalar/NEON interleave.
 
 use core::arch::aarch64::{
     uint64x2_t, vbcaxq_u64, vdupq_n_u64, veor3q_u64, veorq_u64, vgetq_lane_u64, vrax1q_u64,
@@ -53,9 +56,6 @@ pub(crate) fn permute(lanes: &mut [u64; 25]) {
 ///
 /// Packs `a` into lane 0 and `b` into lane 1, runs the two-way permutation, and
 /// writes the results back. The pack/unpack is amortized over the 24 rounds.
-// On `sha3_selkie_hybrid` builds `permute_x4` dispatches to the hybrid kernel;
-// this stays as the Apple-core path and the backend tests' cross-check.
-#[cfg_attr(sha3_selkie_hybrid, allow(dead_code))]
 #[allow(
     clippy::indexing_slicing,
     reason = "every index is a compile-time lane constant `< 25`"

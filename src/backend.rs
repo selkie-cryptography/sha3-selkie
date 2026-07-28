@@ -96,35 +96,77 @@ pub(crate) fn permute(lanes: &mut [u64; 25]) {
     scalar::permute(lanes);
 }
 
-/// Permutes four independent states at once, for the batched sponge.
+/// A batch of independent states permuted together, for the batched sponge.
 ///
-/// Dispatches at compile time: the four-way AVX-512 or AVX2 permutation on
-/// x86-64, the hybrid scalar/NEON kernel on non-Apple aarch64 with the
-/// SHA-3 extension, two two-way NEON permutations on Apple cores, and four
-/// scalar permutations otherwise.
-pub(crate) fn permute_x4(states: &mut [[u64; 25]; 4]) {
-    #[cfg(sha3_selkie_avx512)]
-    avx512::permute_x4(states);
+/// Implemented per batch width so [`SpongeX`](crate::batched) can be generic
+/// over its lane count while each width still reaches the kernel that suits
+/// it.
+pub(crate) trait Batch {
+    /// Applies the 24-round `Keccak-f[1600]` permutation to every state in the
+    /// batch.
+    fn permute(&mut self);
+}
 
-    #[cfg(all(sha3_selkie_avx2, not(sha3_selkie_avx512)))]
-    avx2::permute_x4(states);
+impl Batch for [[u64; 25]; 2] {
+    /// The two-way NEON kernel wherever the SHA-3 extension is available, one
+    /// padded four-way permutation on x86-64, two scalar permutations
+    /// otherwise.
+    ///
+    /// x86-64 has no two-way AVX2/AVX-512 kernel, so it pads to four and
+    /// wastes two lanes. That is the conservative choice: it makes a two-lane
+    /// batch cost exactly what a four-lane one costs, so asking for two can
+    /// never be slower than asking for four. Whether two scalar permutations
+    /// would beat it there is unmeasured.
+    fn permute(&mut self) {
+        #[cfg(sha3_selkie_ext)]
+        {
+            let [a, b] = self;
+            neon::permute_pair(a, b);
+        }
 
-    #[cfg(sha3_selkie_hybrid)]
-    hybrid::permute_x4(states);
+        #[cfg(sha3_selkie_avx2)]
+        {
+            let [a, b] = self;
+            let mut padded = [*a, *b, [0u64; 25], [0u64; 25]];
+            padded.permute();
 
-    #[cfg(all(sha3_selkie_ext, not(sha3_selkie_hybrid)))]
-    {
-        let [a, b, c, d] = states;
-        neon::permute_pair(a, b);
-        neon::permute_pair(c, d);
+            let [permuted_a, permuted_b, _, _] = padded;
+            *a = permuted_a;
+            *b = permuted_b;
+        }
+
+        #[cfg(not(any(sha3_selkie_ext, sha3_selkie_avx2)))]
+        for state in self {
+            permute(state);
+        }
     }
+}
 
-    #[cfg(not(any(sha3_selkie_avx2, sha3_selkie_ext)))]
-    {
-        let [a, b, c, d] = states;
-        scalar::permute(a);
-        scalar::permute(b);
-        scalar::permute(c);
-        scalar::permute(d);
+impl Batch for [[u64; 25]; 4] {
+    /// The four-way AVX-512 or AVX2 permutation on x86-64, the hybrid
+    /// scalar/NEON kernel on non-Apple aarch64 with the SHA-3 extension, two
+    /// two-way NEON permutations on Apple cores, and four scalar permutations
+    /// otherwise.
+    fn permute(&mut self) {
+        #[cfg(sha3_selkie_avx512)]
+        avx512::permute_x4(self);
+
+        #[cfg(all(sha3_selkie_avx2, not(sha3_selkie_avx512)))]
+        avx2::permute_x4(self);
+
+        #[cfg(sha3_selkie_hybrid)]
+        hybrid::permute_x4(self);
+
+        #[cfg(all(sha3_selkie_ext, not(sha3_selkie_hybrid)))]
+        {
+            let [a, b, c, d] = self;
+            neon::permute_pair(a, b);
+            neon::permute_pair(c, d);
+        }
+
+        #[cfg(not(any(sha3_selkie_avx2, sha3_selkie_ext)))]
+        for state in self {
+            permute(state);
+        }
     }
 }
