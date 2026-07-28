@@ -6,9 +6,9 @@ The SHA-3 family over `Keccak-f[1600]`: the fixed-output hashes `Sha3_256`
 and `Sha3_512`, and the extendable-output functions `Shake128` and
 `Shake256`. Each is an incremental hasher (`new` / `update` / `finalize`)
 with a one-shot associated constructor (`digest`). The batched `Shake128X4`
-and `Shake256X4` squeeze four independent streams at once, and `Shake128X2` /
-`Shake256X2` two — for stream counts that would otherwise leave half a
-four-way permutation computing lanes nobody reads.
+and `Shake256X4` squeeze four independent streams at once, `Shake128X2` /
+`Shake256X2` two, and `Shake128X8` / `Shake256X8` eight — so a caller picks
+the width its stream count fills rather than running lanes nobody reads.
 
 ```rust
 use sha3_selkie::{Sha3_256, Shake128};
@@ -49,7 +49,11 @@ The Keccak permutation is dispatched at compile time (the `sha3_selkie_ext`,
   general rotates as shift/shift/or, and the byte-aligned rho rotations
   (lanes 19 and 23) as single `vpshufb` shuffles. Unequal-length inputs fall
   back to scalar.
-- **avx512 (four-way)** — on x86-64 with AVX-512F + VL, the same four-way
+- **avx512 (eight-way and four-way)** — on x86-64 with AVX-512F + VL,
+  `Shake128X8` / `Shake256X8` put eight states in the 64-bit lanes of a
+  512-bit register, packed by three 8x8 transposes; the round body is the
+  four-way one at twice the width, so twice the streams advance for the same
+  per-round instruction count. The four-way path keeps the same
   layout at 256 bits with the richer menu: chi is one `vpternlogq` (truth
   table `0xD2`), three-way xors one each (`0x96`), and `vprolq` rotates
   natively — roughly half the instructions of the AVX2 round. Needs Rust
@@ -80,8 +84,9 @@ over secret values.
 
 Working scalar core with the full public API and NIST CAVP conformance,
 two-way NEON, four-way hybrid scalar/NEON, and four-way AVX2 batched paths
-for `Shake128X4` / `Shake256X4` and `Shake128X2` / `Shake256X2`, and
-hash-function and raw-permutation benchmarks.
+for `Shake128X4` / `Shake256X4`, `Shake128X2` / `Shake256X2`, and an
+eight-way AVX-512 path for `Shake128X8` / `Shake256X8`, plus hash-function
+and raw-permutation benchmarks.
 
 ## License
 

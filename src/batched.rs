@@ -516,3 +516,129 @@ impl Shake256X2Reader {
         self.inner.squeeze(out);
     }
 }
+
+/// Eight independent SHAKE128 streams, for callers with enough streams to fill
+/// a 512-bit AVX-512 permutation.
+#[derive(Clone)]
+pub struct Shake128X8 {
+    /// The absorbing lanes.
+    inner: Absorbing<168, 8>,
+}
+
+impl Shake128X8 {
+    /// Returns eight empty streams (`XOF.Init`).
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            inner: Absorbing::new(),
+        }
+    }
+
+    /// Absorbs one input per lane (`XOF.Absorb`); may be called repeatedly.
+    pub fn update(&mut self, inputs: [&[u8]; 8]) {
+        self.inner.update(inputs);
+    }
+
+    /// Finalizes absorption and returns a reader over the eight output
+    /// streams.
+    #[must_use]
+    pub fn finalize_xof(self) -> Shake128X8Reader {
+        Shake128X8Reader {
+            inner: self.inner.finalize(SHAKE_DOMAIN),
+        }
+    }
+
+    /// Absorbs one input per lane and finalizes in one shot.
+    #[must_use]
+    pub fn absorb(inputs: [&[u8]; 8]) -> Shake128X8Reader {
+        let mut hasher = Self::new();
+        hasher.update(inputs);
+
+        hasher.finalize_xof()
+    }
+}
+
+impl Default for Shake128X8 {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Streaming reader over eight finalized [`Shake128X8`] output streams.
+#[derive(Clone)]
+pub struct Shake128X8Reader {
+    /// The squeezing lanes.
+    inner: Squeezing<168, 8>,
+}
+
+impl Shake128X8Reader {
+    /// Fills each `out[i]` with the next output bytes of lane `i`
+    /// (`XOF.Squeeze`); may be called repeatedly, with the same lockstep rules
+    /// as [`Shake128X4Reader::squeeze`].
+    pub fn squeeze(&mut self, out: [&mut [u8]; 8]) {
+        self.inner.squeeze(out);
+    }
+}
+
+/// Eight independent SHAKE256 streams, the SHAKE256 counterpart of
+/// [`Shake128X8`].
+#[derive(Clone)]
+pub struct Shake256X8 {
+    /// The absorbing lanes.
+    inner: Absorbing<136, 8>,
+}
+
+impl Shake256X8 {
+    /// Returns eight empty streams (`XOF.Init`).
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            inner: Absorbing::new(),
+        }
+    }
+
+    /// Absorbs one input per lane (`XOF.Absorb`); may be called repeatedly.
+    pub fn update(&mut self, inputs: [&[u8]; 8]) {
+        self.inner.update(inputs);
+    }
+
+    /// Finalizes absorption and returns a reader over the eight output
+    /// streams.
+    #[must_use]
+    pub fn finalize_xof(self) -> Shake256X8Reader {
+        Shake256X8Reader {
+            inner: self.inner.finalize(SHAKE_DOMAIN),
+        }
+    }
+
+    /// Absorbs one input per lane and finalizes in one shot.
+    #[must_use]
+    pub fn absorb(inputs: [&[u8]; 8]) -> Shake256X8Reader {
+        let mut hasher = Self::new();
+        hasher.update(inputs);
+
+        hasher.finalize_xof()
+    }
+}
+
+impl Default for Shake256X8 {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Streaming reader over eight finalized [`Shake256X8`] output streams.
+#[derive(Clone)]
+pub struct Shake256X8Reader {
+    /// The squeezing lanes.
+    inner: Squeezing<136, 8>,
+}
+
+impl Shake256X8Reader {
+    /// Fills each `out[i]` with the next output bytes of lane `i`
+    /// (`XOF.Squeeze`); may be called repeatedly, with the same lockstep rules
+    /// as [`Shake256X4Reader::squeeze`].
+    pub fn squeeze(&mut self, out: [&mut [u8]; 8]) {
+        self.inner.squeeze(out);
+    }
+}

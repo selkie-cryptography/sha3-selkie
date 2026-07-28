@@ -370,3 +370,92 @@ fn shake256_x2_agrees_with_x4() {
         assert_eq!(narrow_lane, wide_lane);
     }
 }
+
+/// Every `Shake128X8` lane squeezes the same bytes as a scalar `Shake128` on
+/// that lane's seed, across a multi-block read.
+#[test]
+fn shake128_x8_matches_scalar() {
+    let seeds: [[u8; 34]; 8] =
+        core::array::from_fn(|i| core::array::from_fn(|k| (i * 19 + k * 5) as u8));
+
+    let [s0, s1, s2, s3, s4, s5, s6, s7] = &seeds;
+    let mut batched = Shake128X8::absorb([s0, s1, s2, s3, s4, s5, s6, s7]);
+    let mut lanes = [[0u8; 400]; 8];
+    let [l0, l1, l2, l3, l4, l5, l6, l7] = &mut lanes;
+    batched.squeeze([l0, l1, l2, l3, l4, l5, l6, l7]);
+
+    for (lane, seed) in lanes.iter().zip(&seeds) {
+        assert_eq!(*lane, Shake128::digest::<400>(seed));
+    }
+}
+
+/// The eight lanes of `Shake256X8` agree with the first four of `Shake256X4`
+/// and, beyond them, with the scalar hasher.
+///
+/// The widths reach different kernels — one 512-bit permutation versus two
+/// 256-bit ones, or two four-way halves — so this is the direct cross-width
+/// check that the widest path is not a separate implementation with its own
+/// bugs.
+#[test]
+fn shake256_x8_agrees_with_x4() {
+    let inputs: [[u8; 33]; 8] = core::array::from_fn(|i| [(i as u8 + 1) * 7; 33]);
+
+    let [i0, i1, i2, i3, i4, i5, i6, i7] = &inputs;
+    let mut wide = Shake256X8::absorb([i0, i1, i2, i3, i4, i5, i6, i7]);
+    let mut wide_lanes = [[0u8; 192]; 8];
+    let [w0, w1, w2, w3, w4, w5, w6, w7] = &mut wide_lanes;
+    wide.squeeze([w0, w1, w2, w3, w4, w5, w6, w7]);
+
+    let mut narrow = Shake256X4::absorb([i0, i1, i2, i3]);
+    let mut narrow_lanes = [[0u8; 192]; 4];
+    let [n0, n1, n2, n3] = &mut narrow_lanes;
+    narrow.squeeze([n0, n1, n2, n3]);
+
+    for (wide_lane, narrow_lane) in wide_lanes.iter().zip(&narrow_lanes) {
+        assert_eq!(wide_lane, narrow_lane);
+    }
+
+    for (lane, input) in wide_lanes.iter().zip(&inputs) {
+        assert_eq!(*lane, Shake256::digest::<192>(input));
+    }
+}
+
+/// Unaligned chunked updates match the one-shot absorb at eight lanes, so the
+/// shared cursor logic is pinned at every instantiated width.
+#[test]
+#[allow(
+    clippy::indexing_slicing,
+    reason = "chunk bounds are compile-time constants within the seed length"
+)]
+fn shake128_x8_unaligned_updates_match_scalar() {
+    let seeds: [[u8; 200]; 8] =
+        core::array::from_fn(|i| core::array::from_fn(|k| (i * 23 + k * 11) as u8));
+
+    let chunks = [3usize, 13, 1, 6, 177];
+
+    let mut batched = Shake128X8::new();
+    let mut start = 0;
+    for len in chunks {
+        let [s0, s1, s2, s3, s4, s5, s6, s7] = &seeds;
+        batched.update([
+            &s0[start..start + len],
+            &s1[start..start + len],
+            &s2[start..start + len],
+            &s3[start..start + len],
+            &s4[start..start + len],
+            &s5[start..start + len],
+            &s6[start..start + len],
+            &s7[start..start + len],
+        ]);
+        start += len;
+    }
+
+    let mut reader = batched.finalize_xof();
+    let mut lanes = [[0u8; 64]; 8];
+    let [l0, l1, l2, l3, l4, l5, l6, l7] = &mut lanes;
+    reader.squeeze([l0, l1, l2, l3, l4, l5, l6, l7]);
+
+    for (lane, seed) in lanes.iter().zip(&seeds) {
+        assert_eq!(*lane, Shake128::digest::<64>(seed));
+    }
+}

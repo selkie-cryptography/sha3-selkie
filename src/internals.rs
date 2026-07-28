@@ -21,6 +21,13 @@ pub fn keccak_f1600_x2(states: &mut [[u64; 25]; 2]) {
     states.permute();
 }
 
+/// Applies the 24-round permutation to eight independent states at once — the
+/// batched path behind [`Shake128X8`](crate::Shake128X8) and
+/// [`Shake256X8`](crate::Shake256X8).
+pub fn keccak_f1600_x8(states: &mut [[u64; 25]; 8]) {
+    states.permute();
+}
+
 /// Applies the 24-round permutation to four independent states at once — the
 /// batched path behind [`Shake128X4`](crate::Shake128X4) and
 /// [`Shake256X4`](crate::Shake256X4).
