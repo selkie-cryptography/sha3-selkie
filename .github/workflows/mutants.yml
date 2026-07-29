@@ -19,9 +19,12 @@ permissions:
 # the other legs' backend files: cargo-mutants walks source with syn
 # (cfg-blind), so it would emit mutants for a cfg'd-out file, and those
 # survive trivially. The hybrid backend compiles only on non-Apple aarch64,
-# so its mutants run on the arm64 Linux leg. The AVX-512 backend is excluded
-# everywhere: no mutants leg forces AVX-512 flags (its tests need Intel SDE,
-# far too slow for a mutants run); the CI test leg covers it under SDE.
+# so its mutants run on the arm64 Linux leg. The AVX-512 backend needs Intel
+# SDE to run its tests, far too slow to mutate the whole tree, so it gets a
+# changed-code leg of its own scoped to that one file: on a PR that leaves
+# avx512.rs alone the diff yields no mutants and the leg is nearly free, and
+# on one that touches it the emulated run is bounded by the diff. The weekly
+# full run still excludes it everywhere.
 jobs:
   incremental:
     name: cargo-mutants (changed code, ${{ matrix.arch }})
@@ -42,6 +45,11 @@ jobs:
             os: ubuntu-24.04-arm
             flags: "-C target-feature=+sha3"
             exclude: "src/backend/avx2.rs src/backend/avx512.rs"
+          - arch: x86_64-avx512
+            os: ubuntu-latest
+            flags: "-C target-feature=+avx2,+avx512f,+avx512vl"
+            exclude: ""
+            only: "src/backend/avx512.rs"
     runs-on: ${{ matrix.os }}
     env:
       RUSTFLAGS: ${{ matrix.flags }}
@@ -57,11 +65,25 @@ jobs:
         with:
           tool: cargo-mutants,cargo-nextest
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      # As the CI test leg: pin the target so the AVX-512 flags reach only
+      # target artifacts, then route the test binaries through SDE.
+      - name: Pin the build target
+        if: matrix.arch == 'x86_64-avx512'
+        run: echo "CARGO_BUILD_TARGET=x86_64-unknown-linux-gnu" >> "$GITHUB_ENV"
+      - name: Set up Intel SDE
+        if: matrix.arch == 'x86_64-avx512'
+        uses: petarpetrovt/setup-sde@31aa4a8e85e109bef00f1d838613fcc6ec421271 # v5.0
+      - name: Route test binaries through SDE
+        if: matrix.arch == 'x86_64-avx512'
+        run: |
+          sudo sysctl -qw kernel.yama.ptrace_scope=0
+          echo "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER=$SDE_PATH/sde64 -icl --" >> "$GITHUB_ENV"
       - name: Mutate the PR diff
         run: |
           git diff "origin/${{ github.base_ref }}" -- . > pr.diff
           args=()
           for f in ${{ matrix.exclude }}; do args+=(--exclude "$f"); done
+          for f in ${{ matrix.only }}; do args+=(--file "$f"); done
           status=0
           cargo mutants --in-diff pr.diff --test-tool nextest "${args[@]}" || status=$?
           # Exit 3 means a mutant hung the tests: an infinite-loop mutant is
