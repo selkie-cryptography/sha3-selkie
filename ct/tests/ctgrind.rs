@@ -7,6 +7,11 @@
 //! branch or address depending on the tainted bytes. Keccak is data-oblivious,
 //! so every case must report clean.
 //!
+//! Message lengths are public in this model, so each case sweeps [`LENGTHS`]:
+//! the ragged head and tail of the sponge's byte packing take different paths
+//! at different offsets, and a length-versus-value confusion there is exactly
+//! what these tests exist to catch.
+//!
 //! ```text
 //! cargo test --test ctgrind --no-run
 //! valgrind --tool=memcheck --error-exitcode=1 \
@@ -20,6 +25,18 @@ use sha3_selkie::{
     Sha3_256, Sha3_512, Shake128, Shake128X2, Shake128X4, Shake128X8, Shake256, Shake256X2,
     Shake256X4, Shake256X8,
 };
+
+/// Message lengths spanning the sponge's edges: empty, one byte, and either
+/// side of every rate the crate uses (72, 136, 168), plus a length past the
+/// last of them.
+const LENGTHS: [usize; 12] = [0, 1, 71, 72, 73, 135, 136, 137, 167, 168, 169, 200];
+
+/// Absorb chunk sizes for the incremental cases, each leaving a partial block
+/// outstanding across `update` calls.
+const CHUNKS: [usize; 3] = [1, 7, 64];
+
+/// Longest message any case absorbs, bounding the source buffers.
+const MAX_LEN: usize = 256;
 
 /// Marks `data` secret (undefined) for Valgrind.
 fn mark_secret(data: &[u8]) {
@@ -39,123 +56,258 @@ fn mark_public(data: &[u8]) {
     );
 }
 
+/// Returns `LANES` distinct source buffers, one per batched lane.
+fn lane_buffers<const LANES: usize>() -> [[u8; MAX_LEN]; LANES] {
+    core::array::from_fn(|i| [(i as u8 + 1) * 0x11; MAX_LEN])
+}
+
 #[test]
 fn sha3_256_secret_independent() {
-    let msg = [0x42u8; 200];
-    mark_secret(&msg);
+    let buffer = [0x42u8; MAX_LEN];
 
-    let digest = Sha3_256::digest(&msg);
+    for len in LENGTHS {
+        let msg = &buffer[..len];
+        mark_secret(msg);
 
-    mark_public(&digest);
+        let digest = Sha3_256::digest(msg);
+
+        mark_public(&digest);
+    }
 }
 
 #[test]
 fn sha3_512_secret_independent() {
-    let msg = [0x42u8; 200];
-    mark_secret(&msg);
+    let buffer = [0x42u8; MAX_LEN];
 
-    let digest = Sha3_512::digest(&msg);
+    for len in LENGTHS {
+        let msg = &buffer[..len];
+        mark_secret(msg);
 
-    mark_public(&digest);
+        let digest = Sha3_512::digest(msg);
+
+        mark_public(&digest);
+    }
+}
+
+// The fixed-output hashers reach `finalize` only through the incremental API;
+// `digest` above is a separate path through the same sponge.
+#[test]
+fn sha3_256_incremental_secret_independent() {
+    let buffer = [0x42u8; MAX_LEN];
+
+    for len in LENGTHS {
+        for chunk in CHUNKS {
+            let msg = &buffer[..len];
+            mark_secret(msg);
+
+            let mut hasher = Sha3_256::new();
+            for piece in msg.chunks(chunk) {
+                hasher.update(piece);
+            }
+            let digest = hasher.finalize();
+
+            mark_public(&digest);
+        }
+    }
+}
+
+#[test]
+fn sha3_512_incremental_secret_independent() {
+    let buffer = [0x42u8; MAX_LEN];
+
+    for len in LENGTHS {
+        for chunk in CHUNKS {
+            let msg = &buffer[..len];
+            mark_secret(msg);
+
+            let mut hasher = Sha3_512::new();
+            for piece in msg.chunks(chunk) {
+                hasher.update(piece);
+            }
+            let digest = hasher.finalize();
+
+            mark_public(&digest);
+        }
+    }
 }
 
 #[test]
 fn shake128_secret_independent() {
-    let msg = [0x42u8; 200];
-    mark_secret(&msg);
+    let buffer = [0x42u8; MAX_LEN];
+
+    for len in LENGTHS {
+        let msg = &buffer[..len];
+        mark_secret(msg);
+
+        let mut hasher = Shake128::new();
+        hasher.update(msg);
+        let mut reader = hasher.finalize_xof();
+        let mut out = [0u8; 512];
+        reader.read(&mut out);
+
+        mark_public(&out);
+    }
+}
+
+#[test]
+fn shake256_secret_independent() {
+    let buffer = [0x42u8; MAX_LEN];
+
+    for len in LENGTHS {
+        let msg = &buffer[..len];
+        mark_secret(msg);
+
+        let mut hasher = Shake256::new();
+        hasher.update(msg);
+        let mut reader = hasher.finalize_xof();
+        let mut out = [0u8; 512];
+        reader.read(&mut out);
+
+        mark_public(&out);
+    }
+}
+
+// Chunked absorb carries a partial block between `update` calls, which is
+// where the sponge does the most cursor arithmetic.
+#[test]
+fn shake128_chunked_absorb_secret_independent() {
+    let buffer = [0x42u8; MAX_LEN];
+
+    for len in LENGTHS {
+        for chunk in CHUNKS {
+            let msg = &buffer[..len];
+            mark_secret(msg);
+
+            let mut hasher = Shake128::new();
+            for piece in msg.chunks(chunk) {
+                hasher.update(piece);
+            }
+            let mut reader = hasher.finalize_xof();
+            let mut out = [0u8; 512];
+            reader.read(&mut out);
+
+            mark_public(&out);
+        }
+    }
+}
+
+// Reads that do not land on a rate boundary leave the reader mid-block, so the
+// next call resumes from a partial block rather than permuting first.
+#[test]
+fn shake128_resumed_squeeze_secret_independent() {
+    let buffer = [0x42u8; MAX_LEN];
+    mark_secret(&buffer);
 
     let mut hasher = Shake128::new();
-    hasher.update(&msg);
+    hasher.update(&buffer);
     let mut reader = hasher.finalize_xof();
+
     let mut out = [0u8; 512];
-    reader.read(&mut out);
+    let mut pos = 0;
+    for take in [1usize, 7, 200, 304] {
+        reader.read(&mut out[pos..pos + take]);
+        pos += take;
+    }
 
     mark_public(&out);
 }
 
 #[test]
-fn shake256_secret_independent() {
-    let msg = [0x42u8; 200];
-    mark_secret(&msg);
+fn shake256_resumed_squeeze_secret_independent() {
+    let buffer = [0x42u8; MAX_LEN];
+    mark_secret(&buffer);
 
     let mut hasher = Shake256::new();
-    hasher.update(&msg);
+    hasher.update(&buffer);
     let mut reader = hasher.finalize_xof();
+
     let mut out = [0u8; 512];
-    reader.read(&mut out);
+    let mut pos = 0;
+    for take in [1usize, 7, 200, 304] {
+        reader.read(&mut out[pos..pos + take]);
+        pos += take;
+    }
 
     mark_public(&out);
 }
 
 #[test]
 fn shake128_x4_secret_independent() {
-    let msgs = [[0x11u8; 200], [0x22; 200], [0x33; 200], [0x44; 200]];
+    let msgs = lane_buffers::<4>();
     for msg in &msgs {
         mark_secret(msg);
     }
 
-    let [m0, m1, m2, m3] = &msgs;
-    let mut reader = Shake128X4::absorb([m0, m1, m2, m3]);
-    let mut out = [[0u8; 512]; 4];
-    let [o0, o1, o2, o3] = &mut out;
-    reader.squeeze([o0, o1, o2, o3]);
+    for len in LENGTHS {
+        let [m0, m1, m2, m3] = &msgs;
+        let mut reader = Shake128X4::absorb([&m0[..len], &m1[..len], &m2[..len], &m3[..len]]);
+        let mut out = [[0u8; 512]; 4];
+        let [o0, o1, o2, o3] = &mut out;
+        reader.squeeze([o0, o1, o2, o3]);
 
-    for lane in &out {
-        mark_public(lane);
+        for lane in &out {
+            mark_public(lane);
+        }
     }
 }
 
 #[test]
 fn shake256_x4_secret_independent() {
-    let msgs = [[0x11u8; 200], [0x22; 200], [0x33; 200], [0x44; 200]];
+    let msgs = lane_buffers::<4>();
     for msg in &msgs {
         mark_secret(msg);
     }
 
-    let [m0, m1, m2, m3] = &msgs;
-    let mut reader = Shake256X4::absorb([m0, m1, m2, m3]);
-    let mut out = [[0u8; 512]; 4];
-    let [o0, o1, o2, o3] = &mut out;
-    reader.squeeze([o0, o1, o2, o3]);
+    for len in LENGTHS {
+        let [m0, m1, m2, m3] = &msgs;
+        let mut reader = Shake256X4::absorb([&m0[..len], &m1[..len], &m2[..len], &m3[..len]]);
+        let mut out = [[0u8; 512]; 4];
+        let [o0, o1, o2, o3] = &mut out;
+        reader.squeeze([o0, o1, o2, o3]);
 
-    for lane in &out {
-        mark_public(lane);
+        for lane in &out {
+            mark_public(lane);
+        }
     }
 }
 
 #[test]
 fn shake128_x2_secret_independent() {
-    let msgs = [[0x11u8; 200], [0x22; 200]];
+    let msgs = lane_buffers::<2>();
     for msg in &msgs {
         mark_secret(msg);
     }
 
-    let [m0, m1] = &msgs;
-    let mut reader = Shake128X2::absorb([m0, m1]);
-    let mut out = [[0u8; 512]; 2];
-    let [o0, o1] = &mut out;
-    reader.squeeze([o0, o1]);
+    for len in LENGTHS {
+        let [m0, m1] = &msgs;
+        let mut reader = Shake128X2::absorb([&m0[..len], &m1[..len]]);
+        let mut out = [[0u8; 512]; 2];
+        let [o0, o1] = &mut out;
+        reader.squeeze([o0, o1]);
 
-    for lane in &out {
-        mark_public(lane);
+        for lane in &out {
+            mark_public(lane);
+        }
     }
 }
 
 #[test]
 fn shake256_x2_secret_independent() {
-    let msgs = [[0x11u8; 200], [0x22; 200]];
+    let msgs = lane_buffers::<2>();
     for msg in &msgs {
         mark_secret(msg);
     }
 
-    let [m0, m1] = &msgs;
-    let mut reader = Shake256X2::absorb([m0, m1]);
-    let mut out = [[0u8; 512]; 2];
-    let [o0, o1] = &mut out;
-    reader.squeeze([o0, o1]);
+    for len in LENGTHS {
+        let [m0, m1] = &msgs;
+        let mut reader = Shake256X2::absorb([&m0[..len], &m1[..len]]);
+        let mut out = [[0u8; 512]; 2];
+        let [o0, o1] = &mut out;
+        reader.squeeze([o0, o1]);
 
-    for lane in &out {
-        mark_public(lane);
+        for lane in &out {
+            mark_public(lane);
+        }
     }
 }
 
@@ -164,34 +316,98 @@ fn shake256_x2_secret_independent() {
 // four-way permutations, and the scalar path underneath it.
 #[test]
 fn shake128_x8_secret_independent() {
-    let msgs: [[u8; 200]; 8] = core::array::from_fn(|i| [(i as u8 + 1) * 0x11; 200]);
+    let msgs = lane_buffers::<8>();
     for msg in &msgs {
         mark_secret(msg);
     }
 
-    let [m0, m1, m2, m3, m4, m5, m6, m7] = &msgs;
-    let mut reader = Shake128X8::absorb([m0, m1, m2, m3, m4, m5, m6, m7]);
-    let mut out = [[0u8; 512]; 8];
-    let [o0, o1, o2, o3, o4, o5, o6, o7] = &mut out;
-    reader.squeeze([o0, o1, o2, o3, o4, o5, o6, o7]);
+    for len in LENGTHS {
+        let [m0, m1, m2, m3, m4, m5, m6, m7] = &msgs;
+        let mut reader = Shake128X8::absorb([
+            &m0[..len],
+            &m1[..len],
+            &m2[..len],
+            &m3[..len],
+            &m4[..len],
+            &m5[..len],
+            &m6[..len],
+            &m7[..len],
+        ]);
+        let mut out = [[0u8; 512]; 8];
+        let [o0, o1, o2, o3, o4, o5, o6, o7] = &mut out;
+        reader.squeeze([o0, o1, o2, o3, o4, o5, o6, o7]);
+
+        for lane in &out {
+            mark_public(lane);
+        }
+    }
+}
+
+#[test]
+fn shake256_x8_secret_independent() {
+    let msgs = lane_buffers::<8>();
+    for msg in &msgs {
+        mark_secret(msg);
+    }
+
+    for len in LENGTHS {
+        let [m0, m1, m2, m3, m4, m5, m6, m7] = &msgs;
+        let mut reader = Shake256X8::absorb([
+            &m0[..len],
+            &m1[..len],
+            &m2[..len],
+            &m3[..len],
+            &m4[..len],
+            &m5[..len],
+            &m6[..len],
+            &m7[..len],
+        ]);
+        let mut out = [[0u8; 512]; 8];
+        let [o0, o1, o2, o3, o4, o5, o6, o7] = &mut out;
+        reader.squeeze([o0, o1, o2, o3, o4, o5, o6, o7]);
+
+        for lane in &out {
+            mark_public(lane);
+        }
+    }
+}
+
+// Unequal lane lengths leave the batched lockstep path for one scalar sponge
+// per lane, which no equal-length case reaches. Lengths are public, so the
+// split itself is not a leak; the sponges it produces still must be oblivious.
+#[test]
+fn shake128_x4_ragged_secret_independent() {
+    let msgs = lane_buffers::<4>();
+    for msg in &msgs {
+        mark_secret(msg);
+    }
+
+    let [m0, m1, m2, m3] = &msgs;
+    let mut reader = Shake128X4::absorb([&m0[..0], &m1[..1], &m2[..168], &m3[..200]]);
+    let mut out = [[0u8; 512]; 4];
+    let [o0, o1, o2, o3] = &mut out;
+    reader.squeeze([o0, o1, o2, o3]);
 
     for lane in &out {
         mark_public(lane);
     }
 }
 
+// A ragged squeeze splits lanes that absorbed in lockstep, so the reader
+// carries a batched state into per-lane sponges partway through the stream.
 #[test]
-fn shake256_x8_secret_independent() {
-    let msgs: [[u8; 200]; 8] = core::array::from_fn(|i| [(i as u8 + 1) * 0x11; 200]);
+fn shake128_x4_ragged_squeeze_secret_independent() {
+    let msgs = lane_buffers::<4>();
     for msg in &msgs {
         mark_secret(msg);
     }
 
-    let [m0, m1, m2, m3, m4, m5, m6, m7] = &msgs;
-    let mut reader = Shake256X8::absorb([m0, m1, m2, m3, m4, m5, m6, m7]);
-    let mut out = [[0u8; 512]; 8];
-    let [o0, o1, o2, o3, o4, o5, o6, o7] = &mut out;
-    reader.squeeze([o0, o1, o2, o3, o4, o5, o6, o7]);
+    let [m0, m1, m2, m3] = &msgs;
+    let mut reader = Shake128X4::absorb([m0, m1, m2, m3]);
+
+    let mut out = [[0u8; 512]; 4];
+    let [o0, o1, o2, o3] = &mut out;
+    reader.squeeze([&mut o0[..1], &mut o1[..7], &mut o2[..168], &mut o3[..512]]);
 
     for lane in &out {
         mark_public(lane);
