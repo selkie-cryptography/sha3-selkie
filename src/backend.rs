@@ -207,7 +207,7 @@ pub(crate) fn xor_block(lanes: &mut [u64; 25], pos: usize, data: &[u8]) {
     let mut data = data;
     let mut pos = pos;
 
-    while pos % 8 != 0 {
+    while !pos.is_multiple_of(8) {
         let Some((&byte, rest)) = data.split_first() else {
             return;
         };
@@ -239,7 +239,7 @@ pub(crate) fn read_block(lanes: &[u64; 25], pos: usize, out: &mut [u8]) {
     let mut out = out;
     let mut pos = pos;
 
-    while pos % 8 != 0 {
+    while !pos.is_multiple_of(8) {
         let Some((slot, rest)) = out.split_first_mut() else {
             return;
         };

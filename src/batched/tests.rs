@@ -169,7 +169,7 @@ fn shake256_x4_ragged_repeated_squeeze_matches_scalar() {
 
     let [i0, i1, i2, i3] = &inputs;
     let mut batched = Shake256X4::absorb([i0, i1, i2, i3]);
-    assert!(matches!(batched.inner, Squeezing::Lockstep(_)));
+    assert!(matches!(batched.inner, Sponges::Lockstep(_)));
     let mut scalars = inputs.map(|input| {
         let mut hasher = Shake256::new();
         hasher.update(&input);
@@ -204,9 +204,9 @@ fn shake256_x4_ragged_repeated_squeeze_matches_scalar() {
         // The equal-length rounds must not have left lockstep; the first
         // ragged round must have.
         if round < 2 {
-            assert!(matches!(batched.inner, Squeezing::Lockstep(_)));
+            assert!(matches!(batched.inner, Sponges::Lockstep(_)));
         } else {
-            assert!(matches!(batched.inner, Squeezing::Lanes(_)));
+            assert!(matches!(batched.inner, Sponges::Lanes(_)));
         }
     }
 }
@@ -220,10 +220,10 @@ fn equal_length_updates_stay_lockstep() {
     let mut batched = Shake128X4::new();
     batched.update([b"aaaa", b"bbbb", b"cccc", b"dddd"]);
     batched.update([b"e", b"f", b"g", b"h"]);
-    assert!(matches!(batched.inner, Absorbing::Lockstep(_)));
+    assert!(matches!(batched.inner, Sponges::Lockstep(_)));
 
     batched.update([b"i", b"jj", b"k", b"l"]);
-    assert!(matches!(batched.inner, Absorbing::Lanes(_)));
+    assert!(matches!(batched.inner, Sponges::Lanes(_)));
 }
 
 /// Every `Shake256X4` lane matches a scalar `Shake256` on that lane's input.
@@ -321,7 +321,7 @@ fn shake256_x2_unequal_lengths_match_scalar() {
     let inputs: [&[u8]; 2] = [b"a", b"bbbb"];
 
     let mut batched = Shake256X2::absorb(inputs);
-    assert!(matches!(batched.inner, Squeezing::Lanes(_)));
+    assert!(matches!(batched.inner, Sponges::Lanes(_)));
 
     let mut lanes = [[0u8; 200]; 2];
     let [l0, l1] = &mut lanes;
@@ -340,10 +340,10 @@ fn shake256_x2_equal_length_updates_stay_lockstep() {
     let mut batched = Shake256X2::new();
     batched.update([b"aaaa", b"bbbb"]);
     batched.update([b"e", b"f"]);
-    assert!(matches!(batched.inner, Absorbing::Lockstep(_)));
+    assert!(matches!(batched.inner, Sponges::Lockstep(_)));
 
     batched.update([b"i", b"jj"]);
-    assert!(matches!(batched.inner, Absorbing::Lanes(_)));
+    assert!(matches!(batched.inner, Sponges::Lanes(_)));
 }
 
 /// Two lanes of `Shake256X2` agree with the first two lanes of `Shake256X4`
