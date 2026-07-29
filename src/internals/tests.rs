@@ -3,6 +3,11 @@
 //! These wrappers are thin, but they are the crate's only published view of
 //! the permutation, and a benchmark calling one that quietly did nothing would
 //! report a very good number.
+#![allow(
+    clippy::indexing_slicing,
+    reason = "tests index fixed-size arrays by compile-time-bounded lane, and \
+              a panic here is the assertion mechanism"
+)]
 
 use super::*;
 
