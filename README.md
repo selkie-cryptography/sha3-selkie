@@ -54,36 +54,27 @@ The permutation is dispatched at compile time by `build.rs` (the
   `vprolq` rotates natively — roughly half the AVX2 round's instructions. CI
   gates it under Intel SDE, so it is exercised regardless of runner CPU.
 
-A width above what the target implements decomposes: `*X8` runs as two
-four-way permutations without AVX-512, and `*X2` on x86-64 pads to four rather
-than running scalar lanes, so asking for two never costs more than asking for
-four. A batch stays on the vector path only while its lanes move in lockstep:
-the first unequal-length `update` or read splits it into per-lane scalar
-sponges, each resuming its own stream.
-
 ## Constant-time
 
 Keccak has no data-dependent branches, memory indexing, or rotation amounts,
 so every hasher here is constant-time in its input, suitable for computing
-over secret values. Checked mechanically under Valgrind (`ct/`) on the scalar
-and AVX2 backends; Valgrind decodes neither FEAT_SHA3 nor AVX-512, so the
-remaining kernels rest on the same structural argument.
+over secret values.
+
+Our `ct/` tests run Valgrind memcheck over every public hasher with the message
+bytes marked secret, so memcheck errors on any branch or address depending on
+them. Only the scalar and AVX2 kernels are traced, since Valgrind decodes
+neither the FEAT_SHA3 vector ops nor AVX-512.
 
 ## Testing
 
-- **NIST CAVP known-answer vectors** (`tests/cavp/`): the byte-oriented
-  ShortMsg vectors for SHA3-256/512 and the ShortMsg plus VariableOut vectors
-  for SHAKE128/256, spanning every message length across the rate-block
-  boundaries, plus the Monte Carlo files, whose 100 checkpoints each chain
-  1000 hashes to catch sponge-state carryover bugs a one-shot digest can't.
-- **Differential property tests** (`tests/properties.rs`): every hasher is
-  cross-checked against `libcrux-sha3` on arbitrary inputs and output lengths,
-  alongside the sponge invariants (chunked absorb equals one-shot, chunked
-  squeeze equals bulk, each batched lane equals the scalar hasher).
-- **Large data tests** (`tests/large_data.rs`): gigabyte-scale streamed hashes
-  over a 251-byte pattern misaligned with both rates and the 8-byte lane,
-  stressing incremental absorb across millions of permutations.
-- **Mutation tested** with `cargo-mutants`.
+Every test runs on five backend configurations (portable, AVX2, AVX-512 under
+Intel SDE, NEON, hybrid): the NIST CAVP known-answer vectors including the
+Monte Carlo chains, property tests and two fuzz targets checked differentially
+against `libcrux-sha3`, and cross-checks of each accelerated kernel against the
+scalar reference. Miri covers the portable backend for UB, an s390x `cross
+test` is the only proof the sponge's byte packing is endian-correct, and a
+release-mode job streams gigabytes through the incremental absorb. Mutation
+tested with `cargo-mutants`; the API gated by `cargo-semver-checks`.
 
 ## Status
 
