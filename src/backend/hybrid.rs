@@ -11,6 +11,11 @@
 //! frame assignment with zero materialized rotates per steady round.
 //! Apple cores never dispatch here: their SHA-3 instructions issue on all
 //! four SIMD units and the pure-NEON pairs win.
+//!
+//! The scalar/NEON weave and the lazy rotations are from [Becker-Kannwischer];
+//! the frame assignment and the kernel are derived here rather than ported.
+//!
+//! [Becker-Kannwischer]: https://eprint.iacr.org/2022/1243
 
 use core::arch::global_asm;
 

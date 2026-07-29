@@ -9,6 +9,10 @@
 ///     round. Woven 2 scalar rounds : 1 vector round, two passes.
 ///
 ///   x0 = state (4 sequential [u64; 25]), x1 = 24 round constants
+///
+/// The weave and the lazy rotations are from Becker-Kannwischer,
+/// https://eprint.iacr.org/2022/1243; the frame assignment and this
+/// kernel are derived here rather than ported.
 
 // The assembler needs the SHA-3 mnemonics enabled regardless of the
 // crate's -C target-feature line (LTO release builds assemble
