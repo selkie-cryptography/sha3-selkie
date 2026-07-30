@@ -148,6 +148,24 @@ jobs:
       - name: Doctests
         run: cargo test --doc
 
+  features:
+    name: Feature combinations
+    # `--no-dev-deps` is what makes the feature vary: the self dev-dep enables
+    # `expose-internals` for every target that has dev-deps in the graph.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: stable
+      - uses: taiki-e/install-action@41049aa56687c35e0afa74eed4f09cec4f9afabf # v2
+        with:
+          tool: cargo-hack
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - run: cargo hack check --each-feature --no-dev-deps
+
   benches-compile:
     name: Benchmarks compile
     runs-on: ubuntu-latest
@@ -224,6 +242,40 @@ jobs:
           toolchain: nightly
           components: miri
       - run: cargo miri test --lib
+
+  sanitizers:
+    name: ASan (${{ matrix.backend }})
+    runs-on: ${{ matrix.os }}
+    # miri doesn't work with intrinsics or the asm backends, so ASan covers
+    # those to check for UB.
+    # No avx512 leg: it would need instrumented code, two emulation
+    # layers deep (no avx-512 on github runners). 
+    # avx-512 keeps its correctness leg in `test`.
+    env:
+      RUSTFLAGS: "-Zsanitizer=address ${{ matrix.flags }}"
+      # The library allocates nothing; leaks here would be the test harness.
+      ASAN_OPTIONS: detect_leaks=0
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { backend: portable, os: ubuntu-latest, target: x86_64-unknown-linux-gnu, flags: "" }
+          - { backend: avx2, os: ubuntu-latest, target: x86_64-unknown-linux-gnu, flags: "-C target-feature=+avx2" }
+          - { backend: neon, os: macos-latest, target: aarch64-apple-darwin, flags: "-C target-feature=+sha3" }
+          - { backend: hybrid, os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, flags: "-C target-feature=+sha3" }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: nightly
+          components: rust-src
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      # --target keeps instrumentation off build scripts; -Zbuild-std extends it
+      # to std. Doctests are excluded: the `test` job covers them.
+      - name: Unit and integration tests
+        run: cargo test --lib --tests -Zbuild-std --target ${{ matrix.target }}
 
   big-endian:
     name: big-endian (s390x)

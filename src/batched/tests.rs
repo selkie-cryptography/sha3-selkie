@@ -1,5 +1,10 @@
 //! Differential tests: each batched lane matches the per-stream hasher.
 
+#![allow(
+    clippy::cast_possible_truncation,
+    reason = "seeds are a counter truncated into a byte"
+)]
+
 use super::*;
 use crate::shake::{Shake128, Shake256};
 
