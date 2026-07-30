@@ -51,11 +51,21 @@ jobs:
       # <valgrind/valgrind.h> is present at build time.
       - name: Install Valgrind
         run: sudo apt-get update && sudo apt-get install --yes valgrind
-      - name: Run under memcheck
+      # Runs each test individually under memcheck so an error maps to the
+      # case that caused it, writes the dashboard payload, and exits nonzero
+      # on any leak or broken harness — so this is the gate as well.
+      - name: Run per-test memcheck report
         working-directory: ct
         run: |
-          set -o pipefail
-          bin=$(cargo test --test ctgrind --no-run --message-format=json \
-            | jq -r 'select(.profile.test == true) | .executable' | head -1)
-          valgrind --tool=memcheck --error-exitcode=1 --track-origins=yes \
-            "$bin" --test-threads=1
+          rustc -O --edition 2021 ../.github/scripts/ctgrind-report.rs -o /tmp/ctgrind-report
+          /tmp/ctgrind-report "${{ github.sha }}" > ../ctgrind.json
+      - name: Verify the payload has data
+        if: always()
+        run: jq -e '.tests > 0' ctgrind.json > /dev/null || { echo "::error::ctgrind.json has no test results"; cat ctgrind.json >&2; exit 1; }
+      - name: Upload to dashboard
+        if: always() && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        uses: ./.github/actions/ci-upload
+        with:
+          kind: ctgrind-${{ matrix.backend }}
+          payload: ctgrind.json
+          fly-api-token: ${{ secrets.FLY_API_TOKEN }}

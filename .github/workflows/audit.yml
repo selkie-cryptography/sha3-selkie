@@ -41,3 +41,15 @@ jobs:
         with:
           tool: cargo-deny@0.20.2
       - run: cargo deny check
+      - name: Build dashboard JSON
+        if: always()
+        run: |
+          rustc -O --edition 2021 .github/scripts/deny-report.rs -o /tmp/deny-report
+          /tmp/deny-report "${{ github.sha }}" > deny.json
+      - name: Upload to dashboard
+        if: always() && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        uses: ./.github/actions/ci-upload
+        with:
+          kind: deny
+          payload: deny.json
+          fly-api-token: ${{ secrets.FLY_API_TOKEN }}

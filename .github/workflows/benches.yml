@@ -68,11 +68,16 @@ jobs:
         run: |
           if [ "${{ matrix.backend }}" = "avx512" ] && ! grep -q avx512f /proc/cpuinfo; then
             echo "runner CPU lacks AVX-512; benchmarks skipped" | tee bench-results.txt
+            echo "BENCH_SKIPPED=1" >> "$GITHUB_ENV"
             exit 0
           fi
-          cargo bench --bench hash_functions | tee bench-results.txt
+          set -o pipefail
+          # Both targets: the hash functions are what callers feel, the raw
+          # permutation is the machine-comparable signal the trends key on.
+          cargo bench --bench hash_functions --bench permutation | tee bench-results.txt
       - name: Publish to job summary
         run: |
+          # shellcheck disable=SC2016  # Actions expands its own syntax first
           {
             echo '## divan benchmarks (`${{ matrix.backend }}`, `${{ runner.arch }}`, commit `${{ github.sha }}`)'
             echo '```'
@@ -84,3 +89,47 @@ jobs:
           name: bench-results-${{ matrix.backend }}
           path: bench-results.txt
           retention-days: 90
+      - name: Build dashboard JSON
+        if: env.BENCH_SKIPPED != '1'
+        run: |
+          rustc -O --edition 2021 .github/scripts/divan-to-json.rs -o /tmp/divan-to-json
+          /tmp/divan-to-json < bench-results.txt > bench-flat.json
+          # `summary` carries the permutation medians the trend charts key on;
+          # `groups` is the per-bench table the dashboard renders.
+          jq -n --arg sha "${{ github.sha }}" --argjson benches "$(cat bench-flat.json)" '{
+            sha: $sha,
+            updated_at: (now | todate),
+            groups: (
+              $benches
+              | group_by(.name | split("::")[0])
+              | map({
+                  name: (.[0].name | split("::")[0]),
+                  benchmarks: map({
+                    name: (.name | split("::")[1:] | join("::")),
+                    time_ns: .median_ns,
+                    median_ns, fastest_ns, slowest_ns, mean_ns, samples, iters
+                  })
+                })
+            ),
+            f1600_ns: ([$benches[] | select(.name == "permutation::f1600") | .median_ns] | first),
+            f1600_x2_ns: ([$benches[] | select(.name == "permutation::f1600_x2") | .median_ns] | first),
+            f1600_x4_ns: ([$benches[] | select(.name == "permutation::f1600_x4") | .median_ns] | first)
+          }' > bench.json
+      - name: Verify the payload has data
+        if: env.BENCH_SKIPPED != '1'
+        run: |
+          groups=$(jq '.groups | length' bench.json)
+          benches=$(jq '[.groups[].benchmarks[]] | length' bench.json)
+          echo "bench.json: $groups groups, $benches benchmarks."
+          if [ "$groups" -eq 0 ] || [ "$benches" -eq 0 ]; then
+            echo "::error::bench.json has no benchmark data."
+            cat bench.json >&2 || true
+            exit 1
+          fi
+      - name: Upload to dashboard
+        if: env.BENCH_SKIPPED != '1' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: ./.github/actions/ci-upload
+        with:
+          kind: bench-${{ matrix.backend }}
+          payload: bench.json
+          fly-api-token: ${{ secrets.FLY_API_TOKEN }}

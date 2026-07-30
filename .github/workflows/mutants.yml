@@ -114,6 +114,14 @@ jobs:
             os: ubuntu-24.04-arm
             flags: "-C target-feature=+sha3"
             exclude: "src/backend/avx2.rs src/backend/avx512.rs"
+          # Scoped to the AVX-512 backend rather than the whole crate: every
+          # mutant's tests run under SDE, so mutating `src/` here would pay the
+          # emulation cost on code the other legs already cover natively.
+          - arch: x86_64-avx512
+            os: ubuntu-latest
+            flags: "-C target-feature=+avx2,+avx512f,+avx512vl"
+            exclude: ""
+            only: "src/backend/avx512.rs"
     runs-on: ${{ matrix.os }}
     env:
       RUSTFLAGS: ${{ matrix.flags }}
@@ -128,12 +136,40 @@ jobs:
         with:
           tool: cargo-mutants,cargo-nextest
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      # As the incremental job: pin the target so the AVX-512 flags reach only
+      # target artifacts, then route the test binaries through SDE.
+      - name: Pin the build target
+        if: matrix.arch == 'x86_64-avx512'
+        run: echo "CARGO_BUILD_TARGET=x86_64-unknown-linux-gnu" >> "$GITHUB_ENV"
+      - name: Set up Intel SDE
+        if: matrix.arch == 'x86_64-avx512'
+        uses: petarpetrovt/setup-sde@31aa4a8e85e109bef00f1d838613fcc6ec421271 # v5.0
+      - name: Route test binaries through SDE
+        if: matrix.arch == 'x86_64-avx512'
+        run: |
+          sudo sysctl -qw kernel.yama.ptrace_scope=0
+          echo "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER=$SDE_PATH/sde64 -icl --" >> "$GITHUB_ENV"
       - run: |
           args=()
           for f in ${{ matrix.exclude }}; do args+=(--exclude "$f"); done
+          for f in ${{ matrix.only }}; do args+=(--file "$f"); done
           status=0
           cargo mutants --test-tool nextest "${args[@]}" || status=$?
           # As in the incremental job: timeouts are kills, but only accepted
           # when nothing was also missed.
           if [ "$status" -eq 3 ] && [ ! -s mutants.out/missed.txt ]; then status=0; fi
           exit "$status"
+      # Only the full run feeds the dashboard: the incremental job is scoped to
+      # a PR diff, so its score is not comparable across commits.
+      - name: Build dashboard JSON
+        if: always()
+        run: |
+          rustc -O --edition 2021 .github/scripts/mutants-to-json.rs -o /tmp/mutants-to-json
+          /tmp/mutants-to-json mutants.out/outcomes.json "${{ github.sha }}" > mutants.json
+      - name: Upload to dashboard
+        if: always()
+        uses: ./.github/actions/ci-upload
+        with:
+          kind: mutants-${{ matrix.arch }}
+          payload: mutants.json
+          fly-api-token: ${{ secrets.FLY_API_TOKEN }}

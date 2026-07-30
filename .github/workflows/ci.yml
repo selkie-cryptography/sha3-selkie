@@ -293,3 +293,95 @@ jobs:
         with:
           tool: cross
       - run: cross test --lib --target s390x-unknown-linux-gnu
+
+  unsafe-count:
+    name: unsafe usage census
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: stable
+      - name: Build dashboard JSON
+        run: |
+          rustc -O --edition 2021 .github/scripts/unsafe-count.rs -o /tmp/unsafe-count
+          /tmp/unsafe-count "${{ github.sha }}" > unsafe.json
+          cat unsafe.json
+      - name: Upload to dashboard
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: ./.github/actions/ci-upload
+        with:
+          kind: unsafe
+          payload: unsafe.json
+          fly-api-token: ${{ secrets.FLY_API_TOKEN }}
+
+  # Summarizes the per-backend test matrix above for the dashboard's Platforms
+  # panel, via the Actions REST API — so it reports what actually ran, not what
+  # the matrix declares.
+  platform-report:
+    name: Platform matrix report
+    needs: [test]
+    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: stable
+      - name: Build dashboard JSON
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          rustc -O --edition 2021 .github/scripts/platform-report.rs -o /tmp/platform-report
+          /tmp/platform-report "${{ github.run_id }}" "${{ github.sha }}" > platform.json
+      - name: Verify the payload has data
+        run: jq -e '.platforms | length > 0' platform.json > /dev/null || { echo "::error::platform.json has no jobs"; cat platform.json >&2; exit 1; }
+      - name: Upload to dashboard
+        uses: ./.github/actions/ci-upload
+        with:
+          kind: platform
+          payload: platform.json
+          fly-api-token: ${{ secrets.FLY_API_TOKEN }}
+
+  # Runs the conformance binaries under nextest for JUnit output, which
+  # kat-report shapes into the dashboard's Test Vectors panel. `cavp` and
+  # `properties` only — large_data is `#[ignore]`d and has its own release-mode
+  # job, so folding it in here would run gigabyte hashes on every push.
+  vectors:
+    name: Test vectors report
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: stable
+      - uses: taiki-e/install-action@41049aa56687c35e0afa74eed4f09cec4f9afabf # v2
+        with:
+          tool: cargo-nextest
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Run the conformance suites
+        run: cargo nextest run --profile vectors --test cavp --test properties
+      - name: Build dashboard JSON
+        if: always()
+        run: |
+          rustc -O --edition 2021 .github/scripts/kat-report.rs -o /tmp/kat-report
+          /tmp/kat-report "${{ github.sha }}" target/nextest/vectors/junit.xml > kat.json
+      - name: Verify the payload has data
+        if: always()
+        run: jq -e '.suites | length > 0 and any(.[]; (.tests | length) > 0)' kat.json > /dev/null || { echo "::error::kat.json has no suite results"; cat kat.json >&2; exit 1; }
+      - name: Upload to dashboard
+        if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: ./.github/actions/ci-upload
+        with:
+          kind: kat
+          payload: kat.json
+          fly-api-token: ${{ secrets.FLY_API_TOKEN }}
