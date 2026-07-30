@@ -65,16 +65,39 @@ bytes marked secret, so memcheck errors on any branch or address depending on
 them. Only the scalar and AVX2 kernels are traced, since Valgrind decodes
 neither the FEAT_SHA3 vector ops nor AVX-512.
 
+## Zeroization
+
+`State` and the batched `SpongeX` clear their lanes on drop, with volatile
+stores and a compiler fence so the optimizer can't delete them.
+
+Not covered:
+
+- **Moves.** `finalize`, `finalize_xof`, and `Clone` memcpy the state; the
+  source stays.
+- **Stack spills.** The NEON kernel spills none; 25 lanes fit in vector
+  registers. The scalar kernel spills state to its frame, 48 stores per call
+  on x86-64 and 8 on aarch64.
+- **Registers.** State stays in caller-saved registers.
+- **Skipped drops.** `mem::forget`, `ManuallyDrop`, abort.
+- **Output.** `finalize` returns the digest by value.
+
+This bounds how long state lives at its last address, not whether copies
+remain elsewhere.
+
 ## Testing
 
-Every test runs on five backend configurations (portable, AVX2, AVX-512 under
-Intel SDE, NEON, hybrid): the NIST CAVP known-answer vectors including the
-Monte Carlo chains, property tests and two fuzz targets checked differentially
-against `libcrux-sha3`, and cross-checks of each accelerated kernel against the
-scalar reference. Miri covers the portable backend for UB, an s390x `cross
-test` is the only proof the sponge's byte packing is endian-correct, and a
-release-mode job streams gigabytes through the incremental absorb. Mutation
-tested with `cargo-mutants`; the API gated by `cargo-semver-checks`.
+Every test runs on five backend configurations: portable, AVX2, AVX-512 under
+Intel SDE, NEON, and hybrid.
+
+- NIST CAVP known-answer vectors, including the Monte Carlo chains.
+- Property tests and two fuzz targets, checked differentially against
+  `libcrux-sha3`.
+- Each accelerated kernel cross-checked against the scalar reference.
+- Miri covers the portable backend for UB.
+- An s390x `cross test` is the only proof the sponge's byte packing is
+  endian-correct.
+- A release-mode job streams gigabytes through the incremental absorb.
+- `cargo-mutants` for mutation testing, `cargo-semver-checks` for the API.
 
 ## Status
 

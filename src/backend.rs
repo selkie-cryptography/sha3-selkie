@@ -182,9 +182,15 @@ impl Batch for [[u64; 25]; 2] {
             let mut padded = [*a, *b, [0u64; 25], [0u64; 25]];
             padded.permute();
 
-            let [permuted_a, permuted_b, _, _] = padded;
-            *a = permuted_a;
-            *b = permuted_b;
+            // Borrow rather than destructure, so the results can be copied out
+            // and `padded` still cleared: it holds both states.
+            let [permuted_a, permuted_b, _, _] = &padded;
+            *a = *permuted_a;
+            *b = *permuted_b;
+
+            for state in &mut padded {
+                zero_out(state);
+            }
         }
 
         #[cfg(not(any(sha3_selkie_ext, sha3_selkie_avx2)))]
