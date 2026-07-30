@@ -5,6 +5,8 @@
 //! byte-to-lane packing of the sponge lives in [`crate::sponge`], so a backend
 //! only implements the 24-round permutation over `[u64; 25]`.
 
+use core::sync::atomic::{Ordering, compiler_fence};
+
 #[cfg(test)]
 mod tests;
 
@@ -38,6 +40,34 @@ mod hybrid;
 pub(crate) struct State {
     /// The 25 lanes in row-major `x + 5*y` order.
     lanes: [u64; 25],
+}
+
+/// Overwrites `lanes` with zeros.
+///
+/// A plain `*lane = 0` before a value dies is a dead store, so it may be
+/// deleted; a volatile one may not. The fence stops the stores sinking past
+/// the caller's lifetime, where they would be dead again.
+///
+/// Only clears the bytes at `lanes`. Moves, stack spills, and register saves
+/// each leave a copy this never sees.
+#[allow(
+    unsafe_code,
+    reason = "a volatile store is the operation; a normal one is dead here"
+)]
+pub(crate) fn zero_out(lanes: &mut [u64]) {
+    for lane in lanes {
+        // SAFETY: `lane` is a valid, aligned, initialized `u64` behind `&mut`.
+        unsafe { core::ptr::write_volatile(lane, 0) };
+    }
+
+    compiler_fence(Ordering::SeqCst);
+}
+
+impl Drop for State {
+    /// Clears the lanes; see [`zero_out`] for the limits.
+    fn drop(&mut self) {
+        zero_out(&mut self.lanes);
+    }
 }
 
 impl State {
