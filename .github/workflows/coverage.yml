@@ -74,6 +74,21 @@ jobs:
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           cargo llvm-cov report --summary-only 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
+      - name: Generate dashboard JSON
+        run: |
+          rustc -O --edition 2021 .github/scripts/lcov-to-json.rs -o /tmp/lcov-to-json
+          /tmp/lcov-to-json lcov.info "${{ github.sha }}" > coverage.json
+      - name: Verify the payload has data
+        run: jq -e '(.total.total // 0) > 0 and (.modules | length > 0)' coverage.json > /dev/null || { echo "::error::coverage.json has no module data"; head -c 2000 coverage.json >&2; exit 1; }
+      # One kind per backend: a backend cfg'd out contributes no coverage, so
+      # the dashboard tracks each leg separately rather than merging them.
+      - name: Upload to dashboard
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: ./.github/actions/ci-upload
+        with:
+          kind: coverage-${{ matrix.backend }}
+          payload: coverage.json
+          fly-api-token: ${{ secrets.FLY_API_TOKEN }}
       - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
           files: lcov.info
