@@ -248,7 +248,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     # miri doesn't work with intrinsics or the asm backends, so ASan covers
     # those to check for UB.
-    # No avx512 leg: it would need instrumented code under SDE, two emulation
+    # No avx512 leg: it would need instrumented code, two emulation
     # layers deep (no avx-512 on github runners). 
     # avx-512 keeps its correctness leg in `test`.
     env:
