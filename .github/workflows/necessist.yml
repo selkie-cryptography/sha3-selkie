@@ -2,7 +2,7 @@ name: Necessist
 
 # Removes one statement at a time from each test and reruns it; a test that
 # still passes is redundant or asserting something other than it appears to.
-# The complement to cargo-mutants: that mutates code to find coverage gaps,
+# Complements cargo-mutants: that mutates code to find coverage gaps,
 # this mutates tests to find assertion gaps.
 #
 # Slow and false-positive prone, so out-of-band and never gating a PR.
