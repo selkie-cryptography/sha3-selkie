@@ -1,9 +1,12 @@
-//! Differential tests: each batched lane matches the per-stream hasher.
+//! Differential tests: each batched lane matches the per-stream hasher. Plus
+//! the lockstep sponge's drop-time zeroization.
 
 #![allow(
     clippy::cast_possible_truncation,
     reason = "seeds are a counter truncated into a byte"
 )]
+
+use core::mem::MaybeUninit;
 
 use super::*;
 use crate::shake::{Shake128, Shake256};
@@ -463,4 +466,37 @@ fn shake128_x8_unaligned_updates_match_scalar() {
     for (lane, seed) in lanes.iter().zip(&seeds) {
         assert_eq!(*lane, Shake128::digest::<64>(seed));
     }
+}
+
+/// Drops `sponge` where the test can still see its bytes, and returns the
+/// states left at that address.
+///
+/// Sound for the same reason as the backend's `lanes_after_drop`: the storage
+/// outlives the drop, and the lanes are plain `u64`.
+#[allow(
+    unsafe_code,
+    reason = "checking the drop means reading the address it wrote to"
+)]
+fn states_after_drop<const RATE: usize, const LANES: usize>(
+    sponge: SpongeX<RATE, LANES>,
+) -> [[u64; 25]; LANES] {
+    let mut slot = MaybeUninit::new(sponge);
+
+    // SAFETY: `slot` holds an initialized, aligned `SpongeX`, dropped once. The
+    // read copies the state array out without naming the dropped sponge itself.
+    unsafe {
+        slot.assume_init_drop();
+        (*slot.as_ptr()).states
+    }
+}
+
+/// Dropping a `SpongeX` zeros every lane.
+#[test]
+fn sponge_x_is_zeroed_on_drop() {
+    let sponge = SpongeX::<SHAKE128_RATE, 4> {
+        states: [[0xDEAD_BEEF_DEAD_BEEFu64; 25]; 4],
+        offset: 0,
+    };
+
+    assert_eq!(states_after_drop(sponge), [[0u64; 25]; 4]);
 }
