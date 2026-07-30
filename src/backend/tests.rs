@@ -2,7 +2,7 @@
 //! permutation in isolation from the sponge, and a cross-check of the
 //! accelerated backend against the portable scalar reference.
 
-use super::{Batch, scalar};
+use super::{Batch, State, scalar, zero_out};
 
 /// `Keccak-f[1600]` applied to the all-zero state, lane `x + 5*y`, little-endian
 /// — the canonical Keccak team test vector. Failing this localizes a permutation
@@ -222,4 +222,29 @@ fn batched_pair_matches_scalar() {
         assert_eq!(a, expected_a);
         assert_eq!(b, expected_b);
     }
+}
+
+#[test]
+fn zero_out_clears_every_lane() {
+    let mut lanes = [0xDEAD_BEEF_DEAD_BEEFu64; 25];
+
+    zero_out(&mut lanes);
+
+    assert_eq!(lanes, [0u64; 25]);
+}
+
+#[test]
+fn zero_out_clears_a_partial_slice() {
+    let mut lanes = [1u64; 4];
+
+    zero_out(&mut lanes[..2]);
+
+    assert_eq!(lanes, [0, 0, 1, 1]);
+}
+
+/// Reading the lanes after drop is a use-after-free, so assert the wiring
+/// instead.
+#[test]
+fn state_is_zeroed_on_drop() {
+    assert!(core::mem::needs_drop::<State>());
 }

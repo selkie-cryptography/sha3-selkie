@@ -159,15 +159,30 @@ where
     }
 }
 
+impl<const RATE: usize, const LANES: usize> Drop for SpongeX<RATE, LANES> {
+    /// Clears every lane; see [`backend::zero_out`] for the limits.
+    fn drop(&mut self) {
+        for state in &mut self.states {
+            backend::zero_out(state);
+        }
+    }
+}
+
 impl<const RATE: usize, const LANES: usize> From<SpongeX<RATE, LANES>> for [Sponge<RATE>; LANES] {
     /// Splits the lockstep lanes into scalar sponges (an unequal-length
     /// `update` or ragged squeeze ending the lockstep).
+    ///
+    /// Reads each lane in place, not `states.map(..)`: `SpongeX` is a `Drop`
+    /// type, so its array can't be moved out. Copying it to a local compiles
+    /// but leaves that copy uncleared.
+    #[allow(
+        clippy::indexing_slicing,
+        reason = "`from_fn` supplies `lane < LANES`, the array's own length"
+    )]
     fn from(sponge: SpongeX<RATE, LANES>) -> Self {
         let offset = sponge.offset;
 
-        sponge
-            .states
-            .map(|lanes| Sponge::from_parts(State::from(lanes), offset))
+        core::array::from_fn(|lane| Sponge::from_parts(State::from(sponge.states[lane]), offset))
     }
 }
 
