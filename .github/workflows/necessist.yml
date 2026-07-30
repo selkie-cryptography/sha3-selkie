@@ -1,0 +1,58 @@
+name: Necessist
+
+# Removes one statement at a time from each test and reruns it; a test that
+# still passes is redundant or asserting something other than it appears to.
+# The complement to cargo-mutants: that mutates code to find coverage gaps,
+# this mutates tests to find assertion gaps.
+#
+# Slow and false-positive prone, so out-of-band and never gating a PR.
+
+on:
+  schedule:
+    - cron: "0 7 1 * *"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  necessist:
+    name: Necessist (integration tests)
+    runs-on: ubuntu-latest
+    # Each removed statement is a full test rerun.
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install Necessist
+        run: cargo install necessist --locked
+      - name: Remove statements and rerun
+        # bash for pipefail: the default shell would report tee's status.
+        shell: bash
+        run: necessist tests/cavp.rs tests/properties.rs | tee necessist.log
+      - name: Publish findings
+        if: always()
+        run: |
+          {
+            echo '## Necessist'
+            echo '```'
+            grep 'passed$' necessist.log || echo 'No statements were removable.'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: necessist-log
+          path: necessist.log

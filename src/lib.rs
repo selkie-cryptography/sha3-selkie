@@ -2,6 +2,7 @@
 #![no_std]
 #![deny(missing_docs, clippy::missing_docs_in_private_items)]
 #![deny(clippy::indexing_slicing, clippy::unwrap_used)]
+#![deny(clippy::cast_possible_truncation)]
 #![warn(rust_2018_idioms, unused_lifetimes, unused_qualifications)]
 
 mod backend;

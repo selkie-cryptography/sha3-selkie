@@ -235,6 +235,10 @@ pub(crate) fn xor_block(lanes: &mut [u64; 25], pos: usize, data: &[u8]) {
     clippy::indexing_slicing,
     reason = "callers bound `pos + out.len()` by `RATE <= 200`, so `pos / 8 < 25`"
 )]
+#[allow(
+    clippy::cast_possible_truncation,
+    reason = "the shift selects a byte and the cast discards the rest"
+)]
 pub(crate) fn read_block(lanes: &[u64; 25], pos: usize, out: &mut [u8]) {
     let mut out = out;
     let mut pos = pos;
