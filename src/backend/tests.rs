@@ -2,6 +2,8 @@
 //! permutation in isolation from the sponge, and a cross-check of the
 //! accelerated backend against the portable scalar reference.
 
+use core::mem::MaybeUninit;
+
 use super::{Batch, State, scalar, zero_out};
 
 /// `Keccak-f[1600]` applied to the all-zero state, lane `x + 5*y`, little-endian
@@ -242,9 +244,32 @@ fn zero_out_clears_a_partial_slice() {
     assert_eq!(lanes, [0, 0, 1, 1]);
 }
 
-/// Reading the lanes after drop is a use-after-free, so assert the wiring
-/// instead.
+/// Drops `state` where the test can still see its bytes, and returns the lanes
+/// left at that address.
+///
+/// The drop leaves the storage alive: `MaybeUninit` owns it, and the lanes are
+/// plain `u64` that the drop glue neither deallocates nor invalidates. So the
+/// read afterwards observes what `Drop` wrote, which is the point.
+#[allow(
+    unsafe_code,
+    reason = "checking the drop means reading the address it wrote to"
+)]
+fn lanes_after_drop(state: State) -> [u64; 25] {
+    let mut slot = MaybeUninit::new(state);
+
+    // SAFETY: `slot` holds an initialized, aligned `State`, dropped once. The
+    // read copies a `[u64; 25]` out of that storage without naming the dropped
+    // `State` itself.
+    unsafe {
+        slot.assume_init_drop();
+        (*slot.as_ptr()).lanes
+    }
+}
+
+/// Dropping a `State` zeros its lanes.
 #[test]
 fn state_is_zeroed_on_drop() {
-    assert!(core::mem::needs_drop::<State>());
+    let state = State::from([0xDEAD_BEEF_DEAD_BEEFu64; 25]);
+
+    assert_eq!(lanes_after_drop(state), [0u64; 25]);
 }
