@@ -246,10 +246,11 @@ jobs:
   sanitizers:
     name: ASan (${{ matrix.backend }})
     runs-on: ${{ matrix.os }}
-    # Miri cannot interpret the intrinsics or the asm kernel, so ASan is the
-    # only UB checker reaching the accelerated backends — where the `unsafe` is.
+    # miri doesn't work with intrinsics or the asm backends, so ASan covers
+    # those to check for UB.
     # No avx512 leg: it would need instrumented code under SDE, two emulation
-    # layers deep. That backend keeps its SDE correctness leg in `test`.
+    # layers deep (no avx-512 on github runners). 
+    # avx-512 keeps its correctness leg in `test`.
     env:
       RUSTFLAGS: "-Zsanitizer=address ${{ matrix.flags }}"
       # The library allocates nothing; leaks here would be the test harness.
