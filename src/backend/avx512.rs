@@ -7,6 +7,10 @@
 //! theta's D-lanes and the theta-fold + rho stay two ops: ~95 instructions
 //! per round against AVX2's ~180. 256 bits (VL) rather than 512, which the
 //! four-way layout does not need and which downclocks older Intel cores.
+//!
+//! The eight-way path runs that same round body at 512 bits, eight states in
+//! the 64-bit lanes of each register, packed by three 8x8 transposes. Twice
+//! the streams advance for an unchanged per-round instruction count.
 
 #![allow(
     clippy::incompatible_msrv,
