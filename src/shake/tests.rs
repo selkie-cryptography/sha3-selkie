@@ -41,7 +41,7 @@ fn streaming_matches_bulk() {
     };
     let mut piecemeal = [0u8; 400];
     for slot in &mut piecemeal {
-        reader.read(core::slice::from_mut(slot));
+        reader.squeeze(core::slice::from_mut(slot));
     }
 
     assert_eq!(bulk, piecemeal);
@@ -51,10 +51,14 @@ fn streaming_matches_bulk() {
 #[test]
 fn default_matches_new() {
     let mut from_default = [0u8; 32];
-    Shake128::default().finalize_xof().read(&mut from_default);
+    Shake128::default()
+        .finalize_xof()
+        .squeeze(&mut from_default);
     assert_eq!(from_default, Shake128::digest::<32>(b""));
 
     let mut from_default = [0u8; 32];
-    Shake256::default().finalize_xof().read(&mut from_default);
+    Shake256::default()
+        .finalize_xof()
+        .squeeze(&mut from_default);
     assert_eq!(from_default, Shake256::digest::<32>(b""));
 }

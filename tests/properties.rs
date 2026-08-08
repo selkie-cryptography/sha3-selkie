@@ -10,7 +10,7 @@ fn selkie_shake128(data: &[u8], n: usize) -> Vec<u8> {
 
     let mut reader = hasher.finalize_xof();
     let mut out = vec![0u8; n];
-    reader.read(&mut out);
+    reader.squeeze(&mut out);
 
     out
 }
@@ -73,7 +73,7 @@ proptest! {
         let mut piecemeal = Vec::with_capacity(total);
         for size in chunk_sizes {
             let mut chunk = vec![0u8; size];
-            reader.read(&mut chunk);
+            reader.squeeze(&mut chunk);
             piecemeal.extend_from_slice(&chunk);
         }
 

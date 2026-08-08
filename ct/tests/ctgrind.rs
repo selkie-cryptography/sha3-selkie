@@ -143,7 +143,7 @@ fn shake128_secret_independent() {
         hasher.update(msg);
         let mut reader = hasher.finalize_xof();
         let mut out = [0u8; 512];
-        reader.read(&mut out);
+        reader.squeeze(&mut out);
 
         mark_public(&out);
     }
@@ -161,7 +161,7 @@ fn shake256_secret_independent() {
         hasher.update(msg);
         let mut reader = hasher.finalize_xof();
         let mut out = [0u8; 512];
-        reader.read(&mut out);
+        reader.squeeze(&mut out);
 
         mark_public(&out);
     }
@@ -184,7 +184,7 @@ fn shake128_chunked_absorb_secret_independent() {
             }
             let mut reader = hasher.finalize_xof();
             let mut out = [0u8; 512];
-            reader.read(&mut out);
+            reader.squeeze(&mut out);
 
             mark_public(&out);
         }
@@ -205,7 +205,7 @@ fn shake128_resumed_squeeze_secret_independent() {
     let mut out = [0u8; 512];
     let mut pos = 0;
     for take in [1usize, 7, 200, 304] {
-        reader.read(&mut out[pos..pos + take]);
+        reader.squeeze(&mut out[pos..pos + take]);
         pos += take;
     }
 
@@ -224,7 +224,7 @@ fn shake256_resumed_squeeze_secret_independent() {
     let mut out = [0u8; 512];
     let mut pos = 0;
     for take in [1usize, 7, 200, 304] {
-        reader.read(&mut out[pos..pos + take]);
+        reader.squeeze(&mut out[pos..pos + take]);
         pos += take;
     }
 
