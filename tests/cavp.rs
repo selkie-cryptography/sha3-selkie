@@ -64,7 +64,7 @@ fn shake128(message: &[u8], n: usize) -> Vec<u8> {
 
     let mut reader = hasher.finalize_xof();
     let mut out = vec![0u8; n];
-    reader.read(&mut out);
+    reader.squeeze(&mut out);
 
     out
 }
@@ -76,7 +76,7 @@ fn shake256(message: &[u8], n: usize) -> Vec<u8> {
 
     let mut reader = hasher.finalize_xof();
     let mut out = vec![0u8; n];
-    reader.read(&mut out);
+    reader.squeeze(&mut out);
 
     out
 }

@@ -20,7 +20,7 @@ mod tests;
 /// A sponge absorbs input, is padded once, and from then on only produces
 /// output; absorbing after the pad is meaningless. Rather than two types per
 /// width, each hasher takes a `Phase` parameter and carries the operations of
-/// exactly one phase, so `update`-after-`read` is a compile error and every
+/// exactly one phase, so `update`-after-`squeeze` is a compile error and every
 /// signature names the phase it takes or returns.
 pub mod phase {
     /// Taking input, not yet padded. The starting phase of every hasher.
@@ -85,7 +85,7 @@ impl Shake128<Absorbing> {
         }
     }
 
-    /// Absorbs `data` and reads `N` output bytes in one shot.
+    /// Absorbs `data` and squeezes `N` output bytes in one shot.
     #[must_use]
     pub fn digest<const N: usize>(data: &[u8]) -> [u8; N] {
         let mut hasher = Self::new();
@@ -93,7 +93,7 @@ impl Shake128<Absorbing> {
 
         let mut reader = hasher.finalize_xof();
         let mut out = [0u8; N];
-        reader.read(&mut out);
+        reader.squeeze(&mut out);
 
         out
     }
@@ -108,7 +108,7 @@ impl Default for Shake128<Absorbing> {
 impl Shake128<Squeezing> {
     /// Fills `out` with the next output bytes, extending the stream across
     /// calls.
-    pub fn read(&mut self, out: &mut [u8]) {
+    pub fn squeeze(&mut self, out: &mut [u8]) {
         self.sponge.squeeze(out);
     }
 }
@@ -154,7 +154,7 @@ impl Shake256<Absorbing> {
         }
     }
 
-    /// Absorbs `data` and reads `N` output bytes in one shot.
+    /// Absorbs `data` and squeezes `N` output bytes in one shot.
     #[must_use]
     pub fn digest<const N: usize>(data: &[u8]) -> [u8; N] {
         let mut hasher = Self::new();
@@ -162,7 +162,7 @@ impl Shake256<Absorbing> {
 
         let mut reader = hasher.finalize_xof();
         let mut out = [0u8; N];
-        reader.read(&mut out);
+        reader.squeeze(&mut out);
 
         out
     }
@@ -177,7 +177,7 @@ impl Default for Shake256<Absorbing> {
 impl Shake256<Squeezing> {
     /// Fills `out` with the next output bytes, extending the stream across
     /// calls.
-    pub fn read(&mut self, out: &mut [u8]) {
+    pub fn squeeze(&mut self, out: &mut [u8]) {
         self.sponge.squeeze(out);
     }
 }
