@@ -94,13 +94,6 @@ Intel SDE, NEON, and hybrid.
 - A release-mode job streams gigabytes through the incremental absorb.
 - `cargo-mutants` for mutation testing, `cargo-semver-checks` for the API.
 
-## Status
-
-The full public API with NIST CAVP conformance on every backend: scalar,
-two-way NEON, four-way hybrid scalar/NEON, four-way AVX2, and four- and
-eight-way AVX-512, plus hash-function and raw-permutation benchmarks. MSRV
-1.89, set by the AVX-512 intrinsics' stabilization.
-
 [Becker-Kannwischer]: https://eprint.iacr.org/2022/1243
 
 ## License
