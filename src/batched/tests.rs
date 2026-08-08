@@ -118,7 +118,7 @@ fn shake128_x4_mid_stream_degrade_matches_scalar() {
         scalar.update(tail);
 
         let mut expected = [0u8; 200];
-        scalar.finalize_xof().read(&mut expected);
+        scalar.finalize_xof().squeeze(&mut expected);
         assert_eq!(*lane, expected);
     }
 }
@@ -205,7 +205,7 @@ fn shake256_x4_ragged_repeated_squeeze_matches_scalar() {
 
         for ((lane, scalar), n) in lanes.iter().zip(scalars.iter_mut()).zip(lens) {
             let mut expected = [0u8; 160];
-            scalar.read(&mut expected[..n]);
+            scalar.squeeze(&mut expected[..n]);
             assert_eq!(*lane, expected);
         }
 

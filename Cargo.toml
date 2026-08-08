@@ -10,8 +10,9 @@ keywords = ["cryptography", "sha3", "shake", "keccak", "fips202"]
 categories = ["cryptography", "no-std"]
 repository = "https://github.com/selkie-cryptography/sha3-selkie"
 # The fuzz and ct harnesses are separate workspaces (libfuzzer / Valgrind
-# tooling), not part of the published package.
-exclude = ["fuzz", "ct"]
+# tooling), not part of the published package. CI config isn't either; the
+# CAVP vectors and tests stay, so a consumer can rerun conformance.
+exclude = ["fuzz", "ct", ".github"]
 
 [features]
 # Publishes the bare `Keccak-f[1600]` permutations as `#[doc(hidden)]` items,

@@ -48,7 +48,7 @@ fn shake128(bencher: Bencher<'_, '_>, size: usize) {
 
         let mut reader = hasher.finalize_xof();
         let mut out = [0u8; 32];
-        reader.read(&mut out);
+        reader.squeeze(&mut out);
 
         out
     });
@@ -64,7 +64,7 @@ fn shake256_squeeze(bencher: Bencher<'_, '_>, size: usize) {
         let mut hasher = Shake256::new();
         hasher.update(black_box(&input));
 
-        hasher.finalize_xof().read(out);
+        hasher.finalize_xof().squeeze(out);
     });
 }
 

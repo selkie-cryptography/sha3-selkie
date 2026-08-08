@@ -1,6 +1,8 @@
 name: Release
 
-# Publishes to crates.io via trusted publishing (OIDC) on a v* tag.
+# Publishes to crates.io via trusted publishing (OIDC) on a v* tag, behind a
+# required-reviewer gate. No standing credential: crates.io mints the token for
+# this job from a GitHub-signed JWT, and it is revoked when the job ends.
 #
 # Versioning: pre-1.0 SemVer — 0.x minor may break API, patches don't.
 #
@@ -9,19 +11,29 @@ name: Release
 #   [ ] Actions default token read-only
 #   [ ] ruleset v* tags: restricted creation, immutable, signed
 #   [ ] ruleset main: required checks (CI, Audit)
-#   [ ] `release` environment with a required reviewer
-#   [ ] bootstrap publish (trusted publishing needs an existing crate):
-#       fresh clone of the signed tag, short-lived publish-new token,
-#       cargo publish --locked, revoke the token
+#   [ ] `release` environment, required reviewer, deployment refs limited to v*
+#   [ ] bootstrap 0.1.0 by hand (trusted publishing cannot create a crate):
+#       clean clone of the signed tag, a crate-scoped token with an expiry,
+#       `cargo publish --locked`, revoke the token, then run this workflow
+#       from the Actions tab with that tag to verify it and cut the Release
 #   [ ] configure crates.io trusted publishing: this repo + release.yml +
 #       the `release` environment
 #
-# Each release: bump the version + CHANGELOG in a reviewed PR, then
-# `git tag -s vX.Y.Z` on the merge commit, push, and approve `release`.
+# Each release after that: bump the version in a reviewed PR, `git tag -s
+# vX.Y.Z` on the merge commit, push, and approve `release`. The Release is the
+# changelog, generated from merged PRs. Edit in anything a consumer must act
+# on.
 
 on:
   push:
     tags: ["v*"]
+  # Verify-only, for a tag published by hand: the 0.1.0 bootstrap, or a re-check.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Already-published tag to verify (e.g. v0.1.0)"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -36,6 +48,7 @@ jobs:
   # pushed tag alone can never ship unreviewed code.
   preflight:
     name: Tag provenance
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -48,6 +61,18 @@ jobs:
         run: |
           manifest=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
           [ "${GITHUB_REF_NAME#v}" = "$manifest" ]
+      # Asks GitHub whether the tag is signed, rather than `git verify-tag`:
+      # the runner has no keyring, GitHub holds the account's public keys.
+      - name: Tag is annotated and signed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          read -r type object < <(
+            gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$GITHUB_REF_NAME" \
+              --jq '.object.type + " " + .object.sha')
+          [ "$type" = "tag" ]
+          gh api "repos/$GITHUB_REPOSITORY/git/tags/$object" \
+            --jq '.verification.verified' | grep -qx true
       - name: CI and Audit concluded green on this commit
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
@@ -115,19 +140,28 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
 
-  # Three-way check: a fresh local package of the tag == the CDN artifact ==
-  # the sparse-index checksum cargo verifies on every download. The hash is
-  # recorded in the GitHub Release as an independent public record.
+  # Three-way check: a fresh package of the tagged tree == the CDN artifact ==
+  # the sparse-index checksum cargo verifies on every download. Rebuilding here
+  # rather than trusting the upload is what makes this a witness. The hash goes
+  # in the GitHub Release as a public record.
+  #
+  # Runs after `publish`, or on a manual dispatch naming a tag — which is how
+  # the hand-bootstrapped 0.1.0 gets verified and released.
   verify:
     name: Verify published artifact
-    needs: publish
+    needs: [publish]
+    if: always() && (needs.publish.result == 'success' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     permissions:
       contents: write # creates the GitHub Release
+    env:
+      # Via env, not inline `${{ }}`, so the input can't reach the shell as code.
+      TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          ref: ${{ inputs.tag || github.ref_name }}
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         with:
           toolchain: ${{ env.RELEASE_TOOLCHAIN }}
@@ -135,7 +169,7 @@ jobs:
         run: cargo package --locked --no-verify
       - name: Fetch the registry artifact (retry while the CDN catches up)
         run: |
-          version="${GITHUB_REF_NAME#v}"
+          version="${TAG#v}"
           for _ in $(seq 1 30); do
             curl -fsSL -o registry.crate \
               "https://static.crates.io/crates/sha3-selkie/sha3-selkie-${version}.crate" && exit 0
@@ -144,7 +178,7 @@ jobs:
           exit 1
       - name: Registry artifact and index checksum match our build
         run: |
-          version="${GITHUB_REF_NAME#v}"
+          version="${TAG#v}"
           sha=$(sha256sum "target/package/sha3-selkie-${version}.crate" | cut -d' ' -f1)
           echo "$sha  registry.crate" | sha256sum -c -
           cksum=$(curl -fsSL https://index.crates.io/sh/a3/sha3-selkie \
@@ -155,6 +189,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" --verify-tag \
-            --title "sha3-selkie ${GITHUB_REF_NAME}" \
+          gh release create "$TAG" --verify-tag --generate-notes \
+            --title "sha3-selkie ${TAG}" \
             --notes "\`.crate\` SHA-256: \`${CRATE_SHA256}\` (built and verified with Rust ${RELEASE_TOOLCHAIN})."

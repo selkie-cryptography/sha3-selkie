@@ -46,7 +46,7 @@ fuzz_target!(|input: Input| {
     let mut ours = vec![0u8; out_len];
     let mut xof = sha3_selkie::Shake128::new();
     xof.update(&whole);
-    xof.finalize_xof().read(&mut ours);
+    xof.finalize_xof().squeeze(&mut ours);
 
     let mut reference = vec![0u8; out_len];
     libcrux_sha3::shake128_ema(&mut reference, &whole);

@@ -22,7 +22,7 @@ let mut xof = Shake128::new();
 xof.update(b"seed");
 let mut reader = xof.finalize_xof();
 let mut out = [0u8; 64];
-reader.read(&mut out);
+reader.squeeze(&mut out);
 ```
 
 ## Backends

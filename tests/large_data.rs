@@ -82,13 +82,13 @@ fn large_data_matches_reference() {
         let mut shake128 = Shake128::new();
         stream(total, |chunk| shake128.update(chunk));
         let mut out128 = [0u8; 32];
-        shake128.finalize_xof().read(&mut out128);
+        shake128.finalize_xof().squeeze(&mut out128);
         assert_eq!(hex(&out128), shake128_hex, "shake128 at {total} bytes");
 
         let mut shake256 = Shake256::new();
         stream(total, |chunk| shake256.update(chunk));
         let mut out256 = [0u8; 32];
-        shake256.finalize_xof().read(&mut out256);
+        shake256.finalize_xof().squeeze(&mut out256);
         assert_eq!(hex(&out256), shake256_hex, "shake256 at {total} bytes");
     }
 }

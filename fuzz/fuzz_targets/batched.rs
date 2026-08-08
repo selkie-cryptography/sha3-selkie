@@ -38,7 +38,7 @@ fuzz_target!(|input: Input| {
         let mut scalar = vec![0u8; out_len];
         let mut xof = sha3_selkie::Shake128::new();
         xof.update(seed);
-        xof.finalize_xof().read(&mut scalar);
+        xof.finalize_xof().squeeze(&mut scalar);
 
         assert_eq!(lane, &scalar);
     }
