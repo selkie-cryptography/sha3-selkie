@@ -58,13 +58,13 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         with:
           toolchain: nightly
-      - uses: taiki-e/install-action@6a1bd70eaac3c8bdf093356838d7ee09fda951cf # v2
+      - uses: taiki-e/install-action@6c6fd71fe4fb72c3697d269963d0e15df8adedad # v2
         with:
           tool: cargo-mutants,cargo-nextest
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       # As the CI test leg: pin the target so the AVX-512 flags reach only
       # target artifacts, then route the test binaries through SDE.
       - name: Pin the build target
@@ -72,7 +72,7 @@ jobs:
         run: echo "CARGO_BUILD_TARGET=x86_64-unknown-linux-gnu" >> "$GITHUB_ENV"
       - name: Set up Intel SDE
         if: matrix.arch == 'x86_64-avx512'
-        uses: petarpetrovt/setup-sde@31aa4a8e85e109bef00f1d838613fcc6ec421271 # v5.0
+        uses: petarpetrovt/setup-sde@6d2773bc0ef3005fd52e0ae0bb91782321793aec # v6.0
       - name: Route test binaries through SDE
         if: matrix.arch == 'x86_64-avx512'
         run: |
@@ -129,13 +129,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         with:
           toolchain: nightly
-      - uses: taiki-e/install-action@6a1bd70eaac3c8bdf093356838d7ee09fda951cf # v2
+      - uses: taiki-e/install-action@6c6fd71fe4fb72c3697d269963d0e15df8adedad # v2
         with:
           tool: cargo-mutants,cargo-nextest
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       # As the incremental job: pin the target so the AVX-512 flags reach only
       # target artifacts, then route the test binaries through SDE.
       - name: Pin the build target
@@ -143,7 +143,7 @@ jobs:
         run: echo "CARGO_BUILD_TARGET=x86_64-unknown-linux-gnu" >> "$GITHUB_ENV"
       - name: Set up Intel SDE
         if: matrix.arch == 'x86_64-avx512'
-        uses: petarpetrovt/setup-sde@31aa4a8e85e109bef00f1d838613fcc6ec421271 # v5.0
+        uses: petarpetrovt/setup-sde@6d2773bc0ef3005fd52e0ae0bb91782321793aec # v6.0
       - name: Route test binaries through SDE
         if: matrix.arch == 'x86_64-avx512'
         run: |
