@@ -34,6 +34,8 @@ fn main() {
     };
 }
 
+/// Reads the target arch info and sets the appropriate config flags. If `expect_simd` is
+/// set, then some sort of SIMD backend must be chosen, otherwise it panics.
 fn select_backend(expect_simd: bool) {
     let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
     let target_vendor = env::var("CARGO_CFG_TARGET_VENDOR").unwrap_or_default();
@@ -76,69 +78,8 @@ fn select_backend(expect_simd: bool) {
                     "`sha3_selkie_backend=\"simd\"` used on an arch with no supported SIMD backend"
                 )
             } else {
-                // Nothing. We just use serial
+                // Nothing. We just use scalar
             }
         }
     }
 }
-
-/*
-fn main() {
-    println!("cargo::rustc-check-cfg=cfg(mlkem_selkie_arch, values(\"neon\", \"avx2\"))");
-    println!("cargo::rustc-check-cfg=cfg(mlkem_selkie_neon_asm)");
-    println!("cargo::rustc-check-cfg=cfg(mlkem_selkie_neon_tune, values(any()))");
-    println!("cargo::rerun-if-env-changed=CARGO_CFG_TARGET_ARCH");
-    println!("cargo::rerun-if-env-changed=CARGO_CFG_TARGET_ENDIAN");
-    println!("cargo::rerun-if-env-changed=CARGO_CFG_TARGET_FEATURE");
-    println!("cargo::rerun-if-env-changed=CARGO_CFG_TARGET_VENDOR");
-    println!("cargo::rerun-if-env-changed=CARGO_ENCODED_RUSTFLAGS");
-    println!("cargo::rerun-if-env-changed=MLKEM_SELKIE_NEON_TUNE");
-
-    match std::env::var("CARGO_CFG_MLKEM_SELKIE_BACKEND").as_deref() {
-        Ok("serial") => {
-            panic!("HERE")
-        } // Set no flags
-        Ok("simd") => autodetect(true),
-        Ok(e) => panic!("Unknown `mlkem_selkie_backend` value `{e}`"),
-        _ => autodetect(false),
-    };
-}
-
-/// Autodetects the target arch and sets the appopriate config flags. If `expect_simd` is
-/// set, then some sort of SIMD backend must be chosen, otherwise it panics
-fn autodetect(expect_simd: bool) {
-    let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
-    let target_vendor = env::var("CARGO_CFG_TARGET_VENDOR").unwrap_or_default();
-    let target_features = env::var("CARGO_CFG_TARGET_FEATURE").unwrap_or_default();
-    let has_feature = |name: &str| target_features.split(',').any(|feature| feature == name);
-
-    // The NEON kernels reinterpret vectors between lane widths, which assumes
-    // little-endian lane layout; on `aarch64_be` they would silently
-    // miscompute, so big-endian targets keep the scalar backend. x86_64 has
-    // no big-endian variant.
-    let little_endian = env::var("CARGO_CFG_TARGET_ENDIAN").as_deref() == Ok("little");
-
-    match target_arch.as_str() {
-        "aarch64" if has_feature("neon") && little_endian => {
-            println!("cargo::rustc-cfg=mlkem_selkie_arch=\"neon\"");
-
-            if let Some(tune) = neon_tune(&target_vendor) {
-                println!("cargo::rustc-cfg=mlkem_selkie_neon_asm");
-                println!("cargo::rustc-cfg=mlkem_selkie_neon_tune=\"{tune}\"");
-            }
-        }
-        "x86_64" if has_feature("avx2") => {
-            println!("cargo::rustc-cfg=mlkem_selkie_arch=\"avx2\"");
-        }
-        _ => {
-            if expect_simd {
-                panic!(
-                    "`mlkem_selkies_backend=\"simd\"` used on an arch with no supported SIMD backend"
-                )
-            } else {
-                // Nothing. We just use serial
-            }
-        }
-    }
-}
-*/

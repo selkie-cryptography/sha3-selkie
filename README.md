@@ -59,7 +59,7 @@ Similarly, if you want to ensure the use of a SIMD backend (i.e., any of the abo
 ```
 --cfg sha3_selkie_backend="simd"
 ```
-This will make the compile fail if no compatible SIMD backend is detected.
+This will make the compile fail if no compatible SIMD backend can be chosen.
 
 ## Constant-time
 
