@@ -28,13 +28,13 @@ fn main() {
     // Handle overrides
     match std::env::var("CARGO_CFG_SHA3_SELKIE_BACKEND").as_deref() {
         Ok("scalar") => {} // Set no flags
-        Ok("simd") => autodetect(true),
+        Ok("simd") => select_backend(true),
         Ok(e) => panic!("Unknown `sha3_selkie_backend` value `{e}`"),
-        _ => autodetect(false),
+        _ => select_backend(false),
     };
 }
 
-fn autodetect(expect_simd: bool) {
+fn select_backend(expect_simd: bool) {
     let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
     let target_vendor = env::var("CARGO_CFG_TARGET_VENDOR").unwrap_or_default();
     let target_features = env::var("CARGO_CFG_TARGET_FEATURE").unwrap_or_default();
