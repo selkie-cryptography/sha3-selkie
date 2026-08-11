@@ -49,6 +49,24 @@ Detected at compile time by `build.rs`:
   `ror`-operand under a stationary per-lane frame assignment with zero
   materialized rotates per steady round.
 
+### Backend override
+
+`SHA3_SELKIE_BACKEND` overrides the automatic selection, for A/B
+benchmarking and testing the portable backend on SIMD hardware:
+
+```sh
+# force the portable scalar backend
+SHA3_SELKIE_BACKEND=scalar cargo bench
+
+# fail the build unless a SIMD permutation backend is selected, guarding
+# bench scripts against silently measuring the scalar backend
+SHA3_SELKIE_BACKEND=simd cargo bench
+```
+
+Unset (or empty) selects automatically. Plain NEON without the `sha3`
+target feature counts as scalar: it still runs the scalar permutation.
+Changing the variable triggers a rebuild.
+
 ## Constant-time
 
 Keccak has no data-dependent branches, memory indexing, or rotation amounts,

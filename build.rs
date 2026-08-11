@@ -11,6 +11,10 @@
 //! `sha3_selkie_ext` requires the Arm `sha3` target feature on top of NEON:
 //! the SHA-3 extension instructions are baseline on Apple silicon but not on
 //! every aarch64 target.
+//!
+//! `SHA3_SELKIE_BACKEND` overrides the selection, like the hybrid overrides:
+//! `scalar` keeps the portable backend everywhere, `simd` fails the build
+//! unless a SIMD permutation backend is selected.
 
 use std::env;
 
@@ -22,9 +26,33 @@ fn main() {
     println!("cargo::rustc-check-cfg=cfg(sha3_selkie_hybrid)");
     println!("cargo::rerun-if-env-changed=CARGO_CFG_TARGET_ARCH");
     println!("cargo::rerun-if-env-changed=CARGO_CFG_TARGET_FEATURE");
+    println!("cargo::rerun-if-env-changed=SHA3_SELKIE_BACKEND");
     println!("cargo::rerun-if-env-changed=SHA3_SELKIE_FORCE_HYBRID");
     println!("cargo::rerun-if-env-changed=SHA3_SELKIE_NO_HYBRID");
 
+    // Non-empty means set, as with the hybrid overrides: CI matrices pass ""
+    // for unset legs.
+    let backend = env::var("SHA3_SELKIE_BACKEND").unwrap_or_default();
+    match backend.as_str() {
+        "" => {
+            select_backend();
+        }
+        "scalar" => {}
+        "simd" => {
+            if !select_backend() {
+                panic!(
+                    "SHA3_SELKIE_BACKEND=simd, but this target selects the scalar permutation \
+                     (a SIMD backend needs the aarch64 `sha3` target feature, or x86_64 `avx2`)"
+                );
+            }
+        }
+        other => panic!("SHA3_SELKIE_BACKEND must be `scalar` or `simd`, got `{other}`"),
+    }
+}
+
+/// Emits the backend cfgs for the target; returns whether a SIMD permutation
+/// backend was selected.
+fn select_backend() -> bool {
     let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
     let target_vendor = env::var("CARGO_CFG_TARGET_VENDOR").unwrap_or_default();
     let target_features = env::var("CARGO_CFG_TARGET_FEATURE").unwrap_or_default();
@@ -34,22 +62,25 @@ fn main() {
         "aarch64" if has_feature("neon") => {
             println!("cargo::rustc-cfg=sha3_selkie_arch=\"neon\"");
 
-            if has_feature("sha3") {
-                println!("cargo::rustc-cfg=sha3_selkie_ext");
-
-                // Apple cores run the SHA-3 instructions on every SIMD unit,
-                // so the pure-NEON two-way pairs win there; everywhere else
-                // the batched path takes the hybrid scalar/NEON kernel.
-                // SHA3_SELKIE_FORCE_HYBRID / SHA3_SELKIE_NO_HYBRID override
-                // either way, for testing and A/B benching on one machine
-                // (non-empty means set: CI matrices pass "" for unset legs).
-                let env_set = |name: &str| env::var(name).is_ok_and(|v| !v.is_empty());
-                let force = env_set("SHA3_SELKIE_FORCE_HYBRID");
-                let suppress = env_set("SHA3_SELKIE_NO_HYBRID");
-                if (target_vendor != "apple" || force) && !suppress {
-                    println!("cargo::rustc-cfg=sha3_selkie_hybrid");
-                }
+            if !has_feature("sha3") {
+                return false;
             }
+            println!("cargo::rustc-cfg=sha3_selkie_ext");
+
+            // Apple cores run the SHA-3 instructions on every SIMD unit,
+            // so the pure-NEON two-way pairs win there; everywhere else
+            // the batched path takes the hybrid scalar/NEON kernel.
+            // SHA3_SELKIE_FORCE_HYBRID / SHA3_SELKIE_NO_HYBRID override
+            // either way, for testing and A/B benching on one machine
+            // (non-empty means set: CI matrices pass "" for unset legs).
+            let env_set = |name: &str| env::var(name).is_ok_and(|v| !v.is_empty());
+            let force = env_set("SHA3_SELKIE_FORCE_HYBRID");
+            let suppress = env_set("SHA3_SELKIE_NO_HYBRID");
+            if (target_vendor != "apple" || force) && !suppress {
+                println!("cargo::rustc-cfg=sha3_selkie_hybrid");
+            }
+
+            true
         }
         "x86_64" if has_feature("avx2") => {
             println!("cargo::rustc-cfg=sha3_selkie_arch=\"avx2\"");
@@ -59,7 +90,9 @@ fn main() {
             if has_feature("avx512f") && has_feature("avx512vl") {
                 println!("cargo::rustc-cfg=sha3_selkie_avx512");
             }
+
+            true
         }
-        _ => {}
+        _ => false,
     }
 }
