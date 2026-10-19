@@ -31,7 +31,7 @@ sha3-selkie = { path = ".", features = ["expose-internals"] }
 hex = "0.4"
 proptest = "1"
 # The independent SHA-3 implementation this crate cross-checks against.
-libcrux-sha3 = { version = "=0.0.10", default-features = false }
+libcrux-sha3 = { version = "=0.0.11", default-features = false }
 divan = "0.1"
 
 [[bench]]
