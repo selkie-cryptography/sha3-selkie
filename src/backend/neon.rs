@@ -104,7 +104,8 @@ unsafe fn keccak_f1600_x2(s: &mut [uint64x2_t; 25]) {
         let d3 = vrax1q_u64(c2, c4);
         let d4 = vrax1q_u64(c3, c0);
 
-        // theta fold + rho + pi via XAR: b[pi(x,y)] = ror(s[x,y] ^ d[x], 64 - rho).
+        // theta fold + rho + pi via XAR: b[pi(x,y)] = ror(s[x,y] ^ d[x], 64 -
+        // rho).
         let mut b = [vdupq_n_u64(0); 25];
         b[0] = vxarq_u64::<0>(s[0], d0);
         b[10] = vxarq_u64::<63>(s[1], d1);
@@ -132,7 +133,8 @@ unsafe fn keccak_f1600_x2(s: &mut [uint64x2_t; 25]) {
         b[19] = vxarq_u64::<8>(s[23], d3);
         b[4] = vxarq_u64::<50>(s[24], d4);
 
-        // chi via BCAX: A[x] = B[x] ^ (~B[x+1] & B[x+2]) = bcax(B[x], B[x+2], B[x+1]).
+        // chi via BCAX: A[x] = B[x] ^ (~B[x+1] & B[x+2]) = bcax(B[x], B[x+2],
+        // B[x+1]).
         for row in 0..5 {
             let base = 5 * row;
             s[base] = vbcaxq_u64(b[base], b[base + 2], b[base + 1]);

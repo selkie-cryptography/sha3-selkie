@@ -253,10 +253,8 @@ pub(crate) fn xor_block(lanes: &mut [u64; 25], pos: usize, data: &[u8]) {
     }
 
     let (words, tail) = data.split_at(data.len() - data.len() % 8);
-    for (index, word) in words.chunks_exact(8).enumerate() {
-        let mut buffer = [0u8; 8];
-        buffer.copy_from_slice(word);
-        lanes[pos / 8 + index] ^= u64::from_le_bytes(buffer);
+    for (index, word) in words.as_chunks::<8>().0.iter().enumerate() {
+        lanes[pos / 8 + index] ^= u64::from_le_bytes(*word);
     }
     pos += words.len();
 
@@ -289,8 +287,8 @@ pub(crate) fn read_block(lanes: &[u64; 25], pos: usize, out: &mut [u8]) {
     }
 
     let (words, tail) = out.split_at_mut(out.len() - out.len() % 8);
-    for (index, word) in words.chunks_exact_mut(8).enumerate() {
-        word.copy_from_slice(&lanes[pos / 8 + index].to_le_bytes());
+    for (index, word) in words.as_chunks_mut::<8>().0.iter_mut().enumerate() {
+        *word = lanes[pos / 8 + index].to_le_bytes();
     }
     pos += words.len();
 

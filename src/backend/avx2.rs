@@ -144,7 +144,8 @@ pub(crate) fn permute_x4(states: &mut [[u64; 25]; 4]) {
             b[19] = rol56(_mm256_xor_si256(s[23], d3));
             b[4] = rol::<14, 50>(_mm256_xor_si256(s[24], d4));
 
-            // chi: A[x] = B[x] ^ (~B[x+1] & B[x+2]) = B[x] ^ andnot(B[x+1], B[x+2]).
+            // chi: A[x] = B[x] ^ (~B[x+1] & B[x+2]) = B[x] ^ andnot(B[x+1],
+            // B[x+2]).
             for row in 0..5 {
                 let base = 5 * row;
                 s[base] = _mm256_xor_si256(b[base], _mm256_andnot_si256(b[base + 1], b[base + 2]));
