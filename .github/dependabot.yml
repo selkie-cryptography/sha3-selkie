@@ -3,17 +3,41 @@ updates:
   # Bumps the SHA-pinned action refs, keeping the `# vN` comments legible so a
   # bump reviews as a SHA change next to a version change.
   - package-ecosystem: github-actions
-    directory: /
+    directories:
+      - "/"
+      - "/.github/actions/ci-upload"
     schedule:
       interval: weekly
+    # Skip releases younger than a week; security updates ignore this.
+    # Actions supports only default-days.
+    cooldown:
+      default-days: 7
+    # One PR for most action bumps, auto-merged by dependabot-auto-merge.yml
+    # once CI passes. Actions that run in release.yml get one PR each, for
+    # review.
     groups:
       actions:
         patterns: ["*"]
+        exclude-patterns:
+          - "actions/checkout"
+          - "actions/github-script"
+          - "dtolnay/rust-toolchain"
+          - "rust-lang/crates-io-auth-action"
+          - "taiki-e/install-action"
 
+  # The crate has no runtime dependencies; these are dev, bench and test deps.
   - package-ecosystem: cargo
-    directory: /
+    directory: "/"
     schedule:
       interval: weekly
+    open-pull-requests-limit: 10
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+    # Compatible bumps in one PR, auto-merged once CI passes. Majors get one
+    # PR each, for review.
     groups:
-      cargo:
-        patterns: ["*"]
+      cargo-compatible:
+        update-types:
+          - "minor"
+          - "patch"
